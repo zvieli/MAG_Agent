@@ -44,11 +44,8 @@ async def rerank_chunks_llm(query: str, chunks: List[Dict[str, Any]], top_n: int
         chunk_descriptions.append(f"[{i}] Content: {text_preview}")
     chunks_text = "\n\n".join(chunk_descriptions)
 
-    system_prompt = (
-        "You are a legal document reranking assistant. Evaluate the list of chunks "
-        "and return a JSON list of indices of the top most relevant chunks for the query, "
-        "ordered from most relevant to least relevant. Format: [2, 0, 4]."
-    )
+    from src.utils.config_manager import config_manager
+    system_prompt = await config_manager.get_config("rerank_chunks_system.md")
     user_prompt = f"Query: {query}\n\nChunks:\n{chunks_text}\n\nTop indices:"
     try:
         content = await call_llm(system_prompt, user_prompt, max_tokens=100)
@@ -150,10 +147,8 @@ async def coordinator_node(state: InvestigationState) -> Dict[str, Any]:
         if not user_query:
             user_query = "חקור את החשודים העיקריים" # fallback
         
-        system_prompt = (
-            "You are an investigative planning assistant. Break down the user's initial question "
-            "into a list of up to 3 concrete sub-tasks. Output the tasks as a JSON list of strings."
-        )
+        from src.utils.config_manager import config_manager
+        system_prompt = await config_manager.get_config("coordinator_system.md")
         user_prompt = f"Initial Question: {user_query}"
         try:
             res_str = await call_llm(system_prompt, user_prompt)
@@ -188,12 +183,8 @@ async def route_coordinator(state: InvestigationState) -> str:
     if not state.current_task:
         return "finalizer"
 
-    system_prompt = (
-        "You are an investigative coordinator. Analyze the current task and decide whether it requires "
-        "vector document search ('doc_only'), graph database connections/timeline queries ('graph_only'), "
-        "or parallel execution of both search models ('parallel'). "
-        "Respond with EXACTLY one of these strings: 'doc_only', 'graph_only', 'parallel'."
-    )
+    from src.utils.config_manager import config_manager
+    system_prompt = await config_manager.get_config("route_coordinator_system.md")
     user_prompt = f"Current Task: {state.current_task}"
     try:
         decision = await call_llm(system_prompt, user_prompt)
@@ -213,7 +204,8 @@ async def doc_branch_node(state: InvestigationState) -> Dict[str, Any]:
     logger.info(f"[doc_branch_node] Querying vector search for: '{state.current_task}'")
     
     # 1. Generate optimal search query
-    system_prompt = "Generate a short search query optimized for vector document retrieval based on this task."
+    from src.utils.config_manager import config_manager
+    system_prompt = await config_manager.get_config("doc_search_query_system.md")
     user_prompt = f"Task: {state.current_task}"
     search_query = await call_llm(system_prompt, user_prompt)
     
@@ -239,13 +231,8 @@ async def graph_branch_node(state: InvestigationState) -> Dict[str, Any]:
     logger.info(f"[graph_branch_node] Querying graph traversal for: '{state.current_task}'")
     
     # 1. LLM decision on graph action
-    system_prompt = (
-        "Decide on the best graph action based on this task. "
-        "If it asks for connection path between two actors, output 'connections'. "
-        "If it asks for chronology/timeline of an entity, output 'timeline'. "
-        "Otherwise, output 'ontology' to check rule violations.\n"
-        "Return JSON: {\"action\": \"connections|timeline|ontology\", \"entity_a\": \"...\", \"entity_b\": \"...\"}"
-    )
+    from src.utils.config_manager import config_manager
+    system_prompt = await config_manager.get_config("graph_action_decision_system.md")
     user_prompt = f"Task: {state.current_task}"
     
     action = "ontology"
@@ -297,11 +284,8 @@ async def synthesis_node(state: InvestigationState) -> Dict[str, Any]:
     doc_res = state.transient_doc_results or "No vector search results."
     graph_res = state.transient_graph_results or "No graph search results."
     
-    system_prompt = (
-        "You are an investigative synthesis assistant. Analyze the retrieved graph connections "
-        "and document text chunks. Identify corroborations and contradictions, "
-        "and compile a single synthesized evidence report."
-    )
+    from src.utils.config_manager import config_manager
+    system_prompt = await config_manager.get_config("synthesis_system.md")
     user_prompt = f"Vector Results:\n{doc_res}\n\nGraph Results:\n{graph_res}"
     
     synthesis = await call_llm(system_prompt, user_prompt)
@@ -327,16 +311,8 @@ async def extraction_node(state: InvestigationState) -> Dict[str, Any]:
         }
 
     # 1. Propose fact extraction
-    system_prompt = (
-        "You are a forensic legal fact extractor. Extract a single critical fact "
-        "that is explicitly supported by the evidence. Output JSON format:\n"
-        "{\n"
-        "  \"fact_found\": true|false,\n"
-        "  \"fact\": \"Description of the fact in Hebrew\",\n"
-        "  \"source_id\": \"Chunk ID or Relationship ID\",\n"
-        "  \"confidence\": 0.9\n"
-        "}"
-    )
+    from src.utils.config_manager import config_manager
+    system_prompt = await config_manager.get_config("fact_extraction_system.md")
     user_prompt = f"Evidence:\n{synthesis}"
     
     pending = None
@@ -407,12 +383,8 @@ async def finalizer_node(state: InvestigationState) -> Dict[str, Any]:
         
     ledger_text = "\n".join(ledger_content) if ledger_content else "No verified facts in ledger."
     
-    system_prompt = (
-        "You are a forensic legal report finalizer. Generate a final response "
-        "answering the user's initial question. You MUST base your analysis "
-        "EXCLUSIVELY on the verified facts ledger provided below. Do not extrapolate, "
-        "and do not assume any fact not listed in this ledger."
-    )
+    from src.utils.config_manager import config_manager
+    system_prompt = await config_manager.get_config("finalizer_system.md")
     user_prompt = f"Verified Facts Ledger:\n{ledger_text}"
     
     final_answer = await call_llm(system_prompt, user_prompt)

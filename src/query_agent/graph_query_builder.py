@@ -43,29 +43,13 @@ class GraphQueryBuilder:
         Returns:
             Gremlin query string.
         """
-        system_prompt = (
-            "You are a translation assistant that turns natural language questions into Azure Cosmos DB Gremlin queries.\n"
-            "You must follow these rules strictly:\n\n"
-            f"1. PARTITION ISOLATION (CRITICAL): You MUST filter every traversal by the partition key using .has('partitionKey', '{self.doc_id}').\n"
-            "   This filter must be applied immediately to the starting vertex/vertices (e.g. g.V().has('partitionKey', ...)) and to subsequent traversal hops where vertices/edges are fetched.\n"
-            f"2. CANONICAL ENGLISH ENTITY TYPES: Vertex types (e.g. 'SUSPECT', 'ORGANIZATION', 'EVENT', 'OFFENSE') are stored in the 'type' property (not as Gremlin labels). You MUST filter them using .has('type', 'SUSPECT'), .has('type', 'ORGANIZATION'), etc. Do NOT use .hasLabel('SUSPECT').\n"
-            f"3. RELATION LABELS: Edge labels (e.g. 'MEETING', 'RELATED_TO', 'INDICTED_FOR') are stored as Gremlin edge labels. You can traverse them using .out('MEETING'), .both('RELATED_TO'), etc.\n"
-            f"4. SAFETY LIMIT: You MUST append .limit({safety_limit}) to your final traversal output to protect performance and avoid RUs spikes.\n"
-            "5. SYNTAX: Write valid Gremlin syntax compatible with Azure Cosmos DB Gremlin API. Do NOT use unsupported steps or syntax. Use simplePath() to avoid loops.\n"
-            "6. OUTPUT FORMAT: Respond ONLY with the raw Gremlin query string. Do NOT wrap the query in markdown code blocks (e.g. ```gremlin), do NOT include any introductory or concluding text, and do NOT include comments. Output only the executable query.\n\n"
-            "=== SCHEMA DEFINITIONS ===\n"
-            f"Allowed Node Types (Entity Types):\n{json.dumps(self.entity_types, ensure_ascii=False, indent=2)}\n\n"
-            f"Allowed Edge Labels (Relations):\n{json.dumps(self.relation_types, ensure_ascii=False, indent=2)}\n\n"
-            "=== SCHEMATIC NODE FIELDS ===\n"
-            "- id: Unique identifier (string)\n"
-            "- label: Property storing the Hebrew display name (e.g., 'בנימין נתניהו').\n"
-            "- type: Property storing the entity type (e.g., 'SUSPECT', 'ORGANIZATION', 'EVENT')\n"
-            "- description: Property storing the summary/description\n\n"
-            "=== EXAMPLES ===\n"
-            "Question: Who are the suspects?\n"
-            f"Gremlin Query: g.V().has('partitionKey', '{self.doc_id}').has('type', 'SUSPECT').limit({safety_limit})\n\n"
-            "Question: Which organizations are involved with Netanyahu?\n"
-            f"Gremlin Query: g.V().has('partitionKey', '{self.doc_id}').has('label', 'בנימין נתניהו').both('INVOLVED_IN').has('partitionKey', '{self.doc_id}').has('type', 'ORGANIZATION').dedup().limit({safety_limit})"
+        from src.utils.config_manager import config_manager
+        template = await config_manager.get_config("gremlin_translation_system.md")
+        system_prompt = template.format(
+            doc_id=self.doc_id,
+            safety_limit=safety_limit,
+            entity_types=json.dumps(self.entity_types, ensure_ascii=False, indent=2),
+            relation_types=json.dumps(self.relation_types, ensure_ascii=False, indent=2)
         )
 
         user_prompt = f"Natural Language Question: {question}"
