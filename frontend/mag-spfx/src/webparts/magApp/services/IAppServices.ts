@@ -31,7 +31,7 @@ export interface ITimelineService {
 }
 
 export interface IChatService {
-  ask(docId: string, question: string): Promise<ChatOperation>;
+  ask(docId: string, question: string, state?: any): Promise<ChatOperation>;
   getStatus(statusUrl: string, traceId?: string, startedAtMs?: number): Promise<DurableStatus<ChatAnswer>>;
 }
 

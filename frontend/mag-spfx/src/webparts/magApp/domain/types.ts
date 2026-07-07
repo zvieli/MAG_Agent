@@ -182,6 +182,7 @@ export interface ChatMessage {
 
 export interface ChatAnswer {
   answer: string;
+  state?: any;
 }
 
 export interface ChatOperation {

@@ -288,6 +288,24 @@ class QueryAgent:
                 
         return "Error: Maximum execution turns reached without final response."
 
+    async def answer_question_stateless(self, question: str, state_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        Runs a single turn of the LangGraph state machine.
+        Returns the updated InvestigationState dict.
+        """
+        from src.query_agent.nodes import get_investigative_graph
+        graph = get_investigative_graph()
+        
+        if state_dict:
+            state = InvestigationState(**state_dict)
+        else:
+            state = InvestigationState(doc_id=self.doc_id)
+            state.messages.append({"role": "user", "content": question})
+            
+        current_state_dict = state.model_dump()
+        result = await graph.ainvoke(current_state_dict)
+        return result
+
 
 async def run_chat_loop():
     doc_id = "global"

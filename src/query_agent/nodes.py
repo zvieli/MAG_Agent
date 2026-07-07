@@ -99,6 +99,7 @@ async def process_hitl_node(state: InvestigationState) -> Dict[str, Any]:
     if pending:
         feedback_clean = feedback.strip().lower()
         if feedback_clean == "rejected":
+            logger.info(f"[HITL_MONITOR] [REJECTED] Proposed fact '{pending.fact}' was rejected by user. Audit context: {pending.audit_trace}")
             messages.append({
                 "role": "assistant",
                 "content": f"Fact proposal REJECTED by user: '{pending.fact}'"
@@ -106,6 +107,8 @@ async def process_hitl_node(state: InvestigationState) -> Dict[str, Any]:
         else:
             # If "approved", use the proposed fact; otherwise, use the modified text
             fact_text = pending.fact if feedback_clean == "approved" else feedback
+            action_type = "APPROVED" if feedback_clean == "approved" else "EDITED"
+            logger.info(f"[HITL_MONITOR] [{action_type}] Fact admitted to ledger. Text: '{fact_text}', Source: {pending.source_id}, Audit context: {pending.audit_trace}")
             new_fact = VerifiedFact(
                 fact=fact_text,
                 source_id=pending.source_id,
@@ -322,11 +325,13 @@ async def extraction_node(state: InvestigationState) -> Dict[str, Any]:
             res_str = res_str.replace("```json", "").replace("```", "").strip()
         data = json.loads(res_str)
         if data.get("fact_found") and data.get("fact") and data.get("source_id"):
+            from datetime import datetime
             # Construct Audit Trace with full provenance details
             audit_trace = {
                 "investigative_task": state.current_task,
                 "synthesized_evidence_context": synthesis[:800],
-                "tool_path": ["doc_search", "graph_query"] if state.transient_doc_results and state.transient_graph_results else ["search"]
+                "tool_path": ["doc_search", "graph_query"] if state.transient_doc_results and state.transient_graph_results else ["search"],
+                "timestamp": datetime.utcnow().isoformat() + "Z"
             }
             pending = PendingFactApproval(
                 fact=data["fact"],

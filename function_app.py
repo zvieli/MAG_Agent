@@ -1123,6 +1123,7 @@ async def start_query_async(req: func.HttpRequest, client: df.DurableOrchestrati
 
     question = req_body.get("question")
     doc_id = req_body.get("doc_id")
+    state = req_body.get("state")
 
     if not question:
         return func.HttpResponse("Missing required field: question", status_code=400)
@@ -1131,7 +1132,7 @@ async def start_query_async(req: func.HttpRequest, client: df.DurableOrchestrati
 
     instance_id = await client.start_new(
         "query_orchestrator", 
-        client_input={"question": question, "doc_id": doc_id}
+        client_input={"question": question, "doc_id": doc_id, "state": state}
     )
     
     logging.info(f"[HTTP] Started query orchestration for doc_id {doc_id}. ID: {instance_id}")
@@ -1161,17 +1162,21 @@ def query_orchestrator(context: df.DurableOrchestrationContext):
 async def activity_query_investigation(queryInput: dict) -> dict:
     """
     Stateless activity to route and answer an investigative query.
-    Input format: {"question": str, "doc_id": str}
+    Input format: {"question": str, "doc_id": str, "state": dict}
     """
     question = queryInput["question"]
     doc_id = queryInput["doc_id"]
+    state_dict = queryInput.get("state")
     
     logging.info(f"[ACTIVITY][QUERY][START] doc_id: {doc_id} | question: {question[:50]}...")
     try:
         async with QueryAgent(doc_id=doc_id, stateless=True) as agent:
-            answer = await agent.answer_question_stateless(question)
+            result_state = await agent.answer_question_stateless(question, state_dict)
             logging.info(f"[ACTIVITY][QUERY][END] doc_id: {doc_id} query finished successfully.")
-            return {"answer": answer}
+            return {
+                "state": result_state,
+                "answer": result_state.get("final_answer")
+            }
     except Exception as e:
         import traceback
         error_msg = _compact_error(

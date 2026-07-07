@@ -17,7 +17,7 @@ export class ChatService implements IChatService {
     this.logger = logger;
   }
 
-  public async ask(docId: string, question: string): Promise<ChatOperation> {
+  public async ask(docId: string, question: string, state?: any): Promise<ChatOperation> {
     const traceId = this.logger.createTraceId('query');
     const startedAtMs = Date.now();
     const url = apiUrl(this.apiBaseUrl, '/api/query');
@@ -48,7 +48,7 @@ export class ChatService implements IChatService {
       headers: authHeaders(this.functionKey, {
         'Content-Type': 'application/json'
       }),
-      body: JSON.stringify({ doc_id: docId, question })
+      body: JSON.stringify({ doc_id: docId, question, state })
     }).then((response) =>
       readJson<DurableStartResponse>(response, {
         logger: this.logger,
