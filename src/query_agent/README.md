@@ -1,57 +1,78 @@
 # Investigation Agent (`src/query_agent/`)
 
-This module houses the reasoning layer that interacts with Azure Cosmos DB, Azure AI Search, and Azure Blob Storage to deliver synthesized, evidence-backed answers to complex investigative queries.
+This module houses the orchestrator and reasoning layer of the MAG Agent. It implements a **Stateless LangGraph Pipeline** to verify, search, and synthesize evidence-backed legal answers while ensuring strict partition isolation, payload control, and mandatory human-in-the-loop (HITL) review.
 
 ---
 
-## 🔁 RARR Cycle (Reasoning, Action, Retrieval, and Revision)
+## 🗺️ State-Passing Architecture
 
-To eliminate hallucinations and ensure extreme factual accuracy, the agent implements a three-stage **RARR cycle**:
+Unlike traditional stateful agents that require databases to hold conversation checkpointers, this agent is **stateless**. The entire graph state is serialized to JSON, returned to the client (e.g. CLI or Frontend API), and sent back to the server on the subsequent turn.
+
+### The Ledger of Admissible Facts (`InvestigationState`)
+The state structure is defined using Pydantic in [state.py](file:///home/lior/projects/MAG_Agent/src/query_agent/state.py):
+- `doc_id`: Partition key of the current investigation case (mandatory for Cosmos DB isolation).
+- `investigation_plan`: A scheduled list of sub-tasks built by the Planner/Coordinator.
+- `verified_facts`: The official "Admissible Ledger" of facts confirmed by the user.
+- `pending_fact_approval`: Stores facts discovered by the Extraction node awaiting user approval.
+- `user_feedback`: Collects the user's action (Approved / Discarded / Edited) on the pending fact.
+- `transient_*`: Temporary stores for parallel doc search, graph traversals, and synthesis results that are wiped before returning to the client.
+
+---
+
+## 🔁 LangGraph Execution Flow
+
+The graph contains 10 nodes linked sequentially and conditionally:
 
 ```mermaid
 graph TD
-    A[User Query] --> B[Drafting Stage]
-    B -->|Traverse Cosmos Graph & Search Chunks| C[Draft Response with Citations]
-    C --> D[Verification Stage]
-    D -->|Fetch verbatim quotes from Blob Storage via source_location| E[Validate Citations]
-    E -->|If citation matches| F[Final Synthesis Stage]
-    E -->|If discrepancy or hallucination| G[Revise Draft]
-    G --> F
-    F --> H[Final Hebrew Response with Verified Citations]
+    START([Start]) --> Hydrate[Hydrate Node]
+    Hydrate -->|Feedback Present| ProcessHITL[Process HITL Node]
+    Hydrate -->|No Feedback| Coordinator[Coordinator Node]
+    ProcessHITL --> Coordinator
+    
+    Coordinator --> ParallelBranch{Execute Sub-tasks}
+    ParallelBranch -->|Doc Query| DocSearch[doc_search tool]
+    ParallelBranch -->|Graph Query| GraphQuery[graph_query tool]
+    
+    DocSearch --> Synthesis[Synthesis Node]
+    GraphQuery --> Synthesis
+    
+    Synthesis --> Extraction[Extraction Node]
+    
+    Extraction -->|New Fact Found| Halt[Halt for HITL Node]
+    Extraction -->|No New Facts| Finalizer[Finalizer Node]
+    
+    Halt --> END([Return State to Client])
+    Finalizer --> END
 ```
 
-1. **Drafting**: The agent reasons over the question and performs actions (e.g., shortest-path searches, semantic search) to create a draft answer containing citation anchors.
-2. **Verification**: For every citation, the agent uses `search_original_document` to retrieve the original verbatim text chunk stored in Azure AI Search.
-3. **Final Synthesis & Revision**: The agent compares the draft against the raw text. If any detail is unsupported or hallucinated, the draft is revised. The final output is rendered in Hebrew with verified sources.
+### Key Execution Stages:
+1. **Hydrate Node:** Validates the state schema and enforces **security ownership checks** (verifies that `doc_id` belongs to the current user's permitted cases).
+2. **Process HITL Node:** If `user_feedback` is present, it processes the choice (writing the fact to `verified_facts` with full audit trace details or discarding it) and clears the pending state.
+3. **Coordinator Node:** Deconstructs the user query into parallelizable sub-queries.
+4. **Parallel Tools:** Runs high-performance database traversals (`graph_query`, `graph_timeline`, `check_ontology_rules`) and text index matching (`doc_search`).
+5. **Synthesis Node:** Integrates the evidence from all branches.
+6. **Extraction Node:** Identifies new facts, populates `pending_fact_approval` if any are found, and prunes transient retrieved data to prevent payload bloat.
+7. **Halt for HITL Node:** Forces an interrupt before fact admission, returning the state payload to the client.
+8. **Finalizer Node:** Formulates the final Hebrew response using **only** the approved facts in the ledger, then sanitizes the payload for the client.
 
 ---
 
-## 🛠️ Specialized Investigative Toolset
+## 🛠️ Specialized Programmatic Tools
 
-The query agent is equipped with custom tools mapping directly to cloud resources:
+To prevent LLM query confusion and Gremlin injection risks, dynamic Gremlin generation is deprecated in favor of structured Python tools in [query_agent.py](file:///home/lior/projects/MAG_Agent/src/query_agent/query_agent.py):
+- **`graph_query`**: Traverses nodes and shortest paths inside Cosmos DB.
+- **`graph_timeline`**: Extracts chronologically sorted event chains.
+- **`check_ontology_rules`**: Runs the 7 pushdown legal logic rules directly inside Cosmos DB.
+- **`doc_search`**: Performs hybrid semantic vector search against the Azure AI Search index.
 
-- **`find_connections`**: Performs Gremlin path traversals in **Cosmos DB** (e.g., finding connections between Actor A and Actor B within `doc_id` partition).
-- **`search_original_document`**: Executes semantic and vector searches against the **Azure AI Search** `graphify-chunks` index.
-- **`search_semantic_actions`**: Employs vector embeddings to locate relationship labels and edges that are semantically close to an investigative behavior.
-- **`get_central_actors`**: Evaluates degree centrality inside the Cosmos DB graph to pinpoint critical nodes ("God Nodes").
-- **`global_graph_search`**: Scans community summary json artifacts in storage to resolve broad, thematic inquiries.
-- **`build_timeline`**: Extracts date and event properties from Cosmos vertices/edges to construct a chronological order of events.
-- **`find_isolated_entities`**: Traverses path hops starting from seed entities to find loosely connected or isolated actors.
-
----
-
-## 🗺️ Map-Reduce Query Routing
-
-For complex questions involving multiple events or actors (e.g. *"Compare the activities of X and Y"*), the agent invokes a Map-Reduce flow:
-1. **Map Phase**: Breaks the main question into atomic sub-questions for each individual actor or event.
-2. **Execution**: Queries the sub-questions in parallel using the standard toolset.
-3. **Reduce Phase**: Pools all returned graph schemas and evidence text.
-4. **Synthesis**: Generates a unified comparative answer with direct comparative citations.
+All database tools programmatically inject the current `doc_id` as the partition key.
 
 ---
 
 ## 📂 Key Components
 
-- **`query_agent.py`**: The agent executor defining the tools, prompt templates, RARR cycle loop, and OpenAI orchestration.
-- **`investigative_queries.py`**: Contains helper methods for executing Gremlin commands (pathfinders, central actor queries) via `CloudKnowledgeProvider`.
-- **`ontology_engine.py`**: Validates agent thoughts and actions against the project legal ontology rules.
+- **[query_agent.py](file:///home/lior/projects/MAG_Agent/src/query_agent/query_agent.py)**: Defines the outer agent runtime, specialized tools, and the interactive client-side chat loop.
+- **[nodes.py](file:///home/lior/projects/MAG_Agent/src/query_agent/nodes.py)**: Implements all LangGraph execution nodes and compiles the graph structure.
+- **[state.py](file:///home/lior/projects/MAG_Agent/src/query_agent/state.py)**: Defines the JSON-serializable `InvestigationState` models.
+- **[ontology_engine.py](file:///home/lior/projects/MAG_Agent/src/query_agent/ontology_engine.py)**: Evaluates structural legal integrity constraints as optimized Cosmos DB pushdown queries.

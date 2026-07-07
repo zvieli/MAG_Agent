@@ -1,260 +1,24 @@
-import re
 import logging
+import asyncio
 from typing import List, Dict, Any
-from src.models.models import HEBREW_TYPE_MAP
+from src.graph.cosmos_manager import CosmosGremlinManager
 
-
-class ASTNode:
-    pass
-
-
-class ASTBinaryOp(ASTNode):
-    def __init__(self, left, op, right):
-        self.left = left
-        self.op = op
-        self.right = right
-
-
-class ASTComparison(ASTNode):
-    def __init__(self, left, op, right):
-        self.left = left
-        self.op = op
-        self.right = right
-
-
-class ASTNotExists(ASTNode):
-    def __init__(self, var_name, condition):
-        self.var_name = var_name
-        self.condition = condition
-
-
-class Parser:
-    def __init__(self, text: str):
-        self.tokens = self._tokenize(text)
-        self.pos = 0
-
-    def _tokenize(self, text: str):
-        # Support Hebrew characters in identifiers
-        token_pattern = r"""
-            (?P<AND>\bAND\b) |
-            (?P<OR>\bOR\b) |
-            (?P<NOT_EXISTS>\bNOT\s+EXISTS\b) |
-            (?P<WHERE>\bWHERE\b) |
-            (?P<EQ>==) |
-            (?P<NEQ>!=) |
-            (?P<LPAREN>\() |
-            (?P<RPAREN>\)) |
-            (?P<STRING>'[^']*'|"[^"]*") |
-            (?P<IDENT>[a-zA-Z_א-ת][a-zA-Z0-9_\.א-ת]*) |
-            (?P<WS>\s+)
-        """
-        tokens = []
-        for match in re.finditer(token_pattern, text, re.VERBOSE | re.IGNORECASE):
-            kind = match.lastgroup
-            value = match.group()
-            if kind == "WS":
-                continue
-            if kind == "STRING":
-                value = value[1:-1]
-            tokens.append((kind, value))
-        return tokens
-
-    def peek(self):
-        if self.pos < len(self.tokens):
-            return self.tokens[self.pos]
-        return None
-
-    def consume(self, expected_kind=None):
-        tok = self.peek()
-        if tok:
-            if expected_kind and tok[0] != expected_kind:
-                raise ValueError(f"Expected {expected_kind}, got {tok[0]} ('{tok[1]}')")
-            self.pos += 1
-        return tok
-
-    def parse(self):
-        return self.parse_or()
-
-    def parse_or(self):
-        node = self.parse_and()
-        while self.peek() and self.peek()[0] == "OR":
-            self.consume("OR")
-            right = self.parse_and()
-            node = ASTBinaryOp(node, "OR", right)
-        return node
-
-    def parse_and(self):
-        node = self.parse_primary()
-        while self.peek() and self.peek()[0] == "AND":
-            self.consume("AND")
-            right = self.parse_primary()
-            node = ASTBinaryOp(node, "AND", right)
-        return node
-
-    def parse_primary(self):
-        tok = self.peek()
-        if not tok:
-            raise ValueError("Unexpected end of input")
-
-        if tok[0] == "LPAREN":
-            self.consume("LPAREN")
-            node = self.parse()
-            self.consume("RPAREN")
-            return node
-
-        if tok[0] == "NOT_EXISTS":
-            self.consume("NOT_EXISTS")
-            self.consume("LPAREN")
-            var_tok = self.consume("IDENT")
-            var_name = var_tok[1]
-            condition = None
-            if self.peek() and self.peek()[0] == "WHERE":
-                self.consume("WHERE")
-                condition = self.parse()
-            self.consume("RPAREN")
-            return ASTNotExists(var_name, condition)
-
-        left_tok = self.consume("IDENT")
-        left = left_tok[1]
-
-        op_tok = self.peek()
-        if not op_tok or op_tok[0] not in ("EQ", "NEQ"):
-            raise ValueError(f"Expected comparison operator, got {op_tok}")
-        op = self.consume()[1]
-
-        right_tok = self.peek()
-        if not right_tok:
-            raise ValueError("Expected value after comparison operator")
-
-        if right_tok[0] == "STRING":
-            right = self.consume("STRING")[1]
-            # Wrap string in quotes to distinguish it from identifier in evaluator
-            return ASTComparison(left, op, f"'{right}'")
-        else:
-            right = self.consume("IDENT")[1]
-            return ASTComparison(left, op, right)
-
-
-class Evaluator:
-    def __init__(self, engine, nodes, edges):
-        self.engine = engine
-        self.nodes = nodes
-        self.edges = edges
-        self.node_lookup = {str(n.get("id")): n for n in nodes}
-
-    def evaluate(self, ast, ctx):
-        if isinstance(ast, ASTBinaryOp):
-            left_val = self.evaluate(ast.left, ctx)
-            if ast.op.upper() == "AND":
-                if not left_val:
-                    return False
-                return self.evaluate(ast.right, ctx)
-            elif ast.op.upper() == "OR":
-                if left_val:
-                    return True
-                return self.evaluate(ast.right, ctx)
-
-        elif isinstance(ast, ASTComparison):
-            left_val, left_type = self._resolve(ast.left, ctx)
-
-            if ast.right.startswith("'"):
-                right_val = ast.right[1:-1]
-            else:
-                right_val, _ = self._resolve(ast.right, ctx)
-                if not right_val and ast.right not in ctx:
-                    right_val = ast.right  # Literal fallback
-
-            if ast.op == "==":
-                return self.engine._matches(right_val, left_val, left_type)
-            elif ast.op == "!=":
-                return not self.engine._matches(right_val, left_val, left_type)
-
-        elif isinstance(ast, ASTNotExists):
-            if ast.var_name == "edge":
-                # Optimization: if condition has edge.source == node.id, we can filter edges
-                for edge in self.edges:
-                    sub_ctx = dict(ctx)
-                    sub_ctx["edge"] = edge
-                    if not ast.condition or self.evaluate(ast.condition, sub_ctx):
-                        return False
-                return True
-            elif ast.var_name == "node":
-                for node in self.nodes:
-                    sub_ctx = dict(ctx)
-                    sub_ctx["node"] = node
-                    if not ast.condition or self.evaluate(ast.condition, sub_ctx):
-                        return False
-                return True
-        return False
-
-    def _resolve(self, path: str, ctx: dict):
-        if path in ctx:
-            obj = ctx[path]
-            if isinstance(obj, dict) and "id" in obj:
-                return str(obj["id"]), "unknown"
-            return str(obj), "unknown"
-
-        parts = path.split(".")
-        base = parts[0]
-        if base not in ctx:
-            return "", "unknown"
-
-        obj = ctx[base]
-
-        # Handle edge.source.class or edge.target.class
-        if base == "edge" and len(parts) >= 3:
-            if parts[1] in ("source", "target"):
-                node_id = str(obj.get(parts[1]))
-                node = self.node_lookup.get(node_id, {})
-                if parts[2] == "class":
-                    return str(node.get("type", "")), "class"
-                else:
-                    return str(node.get(parts[2], "")), "unknown"
-
-        val = obj
-        for p in parts[1:]:
-            if isinstance(val, dict):
-                if p == "class":
-                    p = "type"
-                val = val.get(p, "")
-            else:
-                val = ""
-                break
-
-        field_type = parts[-1]
-        if field_type == "class":
-            field_type = "class"
-        elif field_type == "epistemic_state":
-            field_type = "epistemic_state"
-        elif field_type == "relation":
-            field_type = "relation"
-        else:
-            field_type = "unknown"
-
-        return str(val), field_type
-
+logger = logging.getLogger(__name__)
 
 class OntologyEngine:
     """
     Core reasoning engine that evaluates graph patterns against legal ontology rules.
-
-    Operates on a subset of the graph (typically search results) to identify
-    potential legal violations or forensic patterns defined in the schema.
+    Refactored to push down evaluations directly to the Azure Cosmos DB Gremlin API.
     """
 
     def __init__(self, schema_config: Dict[str, Any]):
         """
         Initializes the OntologyEngine.
-
-        Args:
-            schema_config: Dictionary containing ontology rules and type mappings.
         """
         self.schema = schema_config
         self.rules = self.schema.get("ontology_engine", {}).get("reasoning_rules", [])
         if not self.rules:
-            # Fallback for old schema format
             self.rules = self.schema.get("reasoning_rules", [])
-        self._parser_cache = {}
 
     def map_query(self, query: str) -> List[Dict[str, str]]:
         """
@@ -266,116 +30,223 @@ class OntologyEngine:
         self, matched_nodes: List[Dict[str, Any]], matched_edges: List[Dict[str, Any]]
     ) -> List[str]:
         """
-        Evaluates the provided graph data against loaded ontology rules.
+        [DEPRECATED] In-memory AST evaluation of graph rules.
+        Use evaluate_pushdown for direct Cosmos DB pushdown.
+        """
+        logger.warning("evaluate_graph_data is deprecated. Use evaluate_pushdown instead.")
+        return []
 
-        Performs strictly structural evaluation based on node types and edge relations
-        using a custom parser and evaluator.
+    async def evaluate_pushdown(self, cosmos_mgr: CosmosGremlinManager, doc_id: str) -> List[str]:
+        """
+        Evaluates the loaded ontology rules directly in Cosmos DB using optimized Gremlin pushdowns.
 
         Args:
-            matched_nodes: List of nodes retrieved during search.
-            matched_edges: List of edges retrieved during search.
+            cosmos_mgr: CosmosGremlinManager connection helper.
+            doc_id: Partition context for isolation.
 
         Returns:
             List of 'LEGAL FLAG' strings triggered by the reasoning rules.
         """
-        flags = []
-        if not self.rules:
-            return flags
+        if not cosmos_mgr:
+            logger.warning("[OntologyEngine] CosmosGremlinManager not provided. Skipping pushdown rules.")
+            return []
 
-        logging.info(
-            f"[OntologyEngine] Evaluating {len(matched_nodes)} nodes and {len(matched_edges)} edges against {len(self.rules)} rules..."
-        )
+        pk = doc_id or "global"
+        logger.info(f"[OntologyEngine] Executing pushdown rule evaluation on partition '{pk}'...")
 
-        evaluator = Evaluator(self, matched_nodes, matched_edges)
+        # Helper to extract value safely from project output
+        def val(item, key, default="unknown"):
+            if not isinstance(item, dict):
+                return default
+            res = item.get(key)
+            if isinstance(res, list) and len(res) > 0:
+                return res[0]
+            return res or default
 
-        for rule in self.rules:
-            condition = rule.get("condition", {})
-            match_type = condition.get("match")
-            where_clause = condition.get("where", "")
-            action = rule.get("action", {})
-            flag_msg = action.get("flag")
-
-            if not flag_msg or not where_clause:
-                continue
-
-            if where_clause not in self._parser_cache:
-                try:
-                    parser = Parser(where_clause)
-                    self._parser_cache[where_clause] = parser.parse()
-                except Exception as e:
-                    logging.error(
-                        f"[OntologyEngine] Failed to parse rule '{rule.get('name')}': {e}"
+        # Define specialized tasks for each rule
+        async def check_hearsay():
+            query = (
+                "g.E().has('partitionKey', pk).has('epistemic_state', 'HEARSAY')"
+                ".project('id', 'relation', 'source', 'target')"
+                ".by('id').by(label).by(outV().values('label').fold()).by(inV().values('label').fold())"
+                ".limit(50)"
+            )
+            try:
+                results = await cosmos_mgr.execute_query(query, {"pk": pk})
+                flags = []
+                for item in results:
+                    rel = val(item, "relation")
+                    src = val(item, "source", ["unknown"])
+                    tgt = val(item, "target", ["unknown"])
+                    src_label = src[0] if isinstance(src, list) and src else src
+                    tgt_label = tgt[0] if isinstance(tgt, list) and tgt else tgt
+                    flags.append(
+                        f"🚨 LEGAL FLAG: Rule 'hearsay_inadmissibility' triggered on relation '{rel}' "
+                        f"between '{src_label}' and '{tgt_label}'. Action: REQUIRES_LEGAL_REVIEW."
                     )
-                    continue
+                return flags
+            except Exception as e:
+                logger.error(f"[OntologyEngine] hearsay_inadmissibility rule check failed: {e}")
+                return []
 
-            ast = self._parser_cache[where_clause]
+        async def check_accomplice_corroboration():
+            query = (
+                "g.E().has('partitionKey', pk).hasLabel('TESTIFIED_ABOUT')"
+                ".where(outV().has('type', 'Accomplice'))"
+                ".project('id', 'relation', 'source', 'target')"
+                ".by('id').by(label).by(outV().values('label').fold()).by(inV().values('label').fold())"
+                ".limit(50)"
+            )
+            try:
+                results = await cosmos_mgr.execute_query(query, {"pk": pk})
+                flags = []
+                for item in results:
+                    rel = val(item, "relation")
+                    src = val(item, "source", ["unknown"])
+                    tgt = val(item, "target", ["unknown"])
+                    src_label = src[0] if isinstance(src, list) and src else src
+                    tgt_label = tgt[0] if isinstance(tgt, list) and tgt else tgt
+                    flags.append(
+                        f"🚨 LEGAL FLAG: Rule 'accomplice_corroboration_requirement' triggered on relation '{rel}' "
+                        f"between '{src_label}' and '{tgt_label}'. Action: MISSING_CORROBORATION_EVIDENCE."
+                    )
+                return flags
+            except Exception as e:
+                logger.error(f"[OntologyEngine] accomplice_corroboration rule check failed: {e}")
+                return []
 
-            if match_type == "edge":
-                for edge in matched_edges:
-                    try:
-                        if evaluator.evaluate(ast, {"edge": edge}):
-                            insight = f"🚨 LEGAL FLAG: Rule '{rule['name']}' triggered on relation '{edge.get('relation')}' between '{edge.get('source_label', edge.get('source'))}' and '{edge.get('target_label', edge.get('target'))}'. Action: {flag_msg}."
-                            if insight not in flags:
-                                flags.append(insight)
-                    except Exception:
-                        # Silently skip if evaluation fails for a specific edge
-                        pass
+        async def check_state_witness_corroboration():
+            query = (
+                "g.E().has('partitionKey', pk).has('epistemic_state', 'STATE_WITNESS_TESTIMONY')"
+                ".project('id', 'relation', 'source', 'target')"
+                ".by('id').by(label).by(outV().values('label').fold()).by(inV().values('label').fold())"
+                ".limit(50)"
+            )
+            try:
+                results = await cosmos_mgr.execute_query(query, {"pk": pk})
+                flags = []
+                for item in results:
+                    rel = val(item, "relation")
+                    src = val(item, "source", ["unknown"])
+                    tgt = val(item, "target", ["unknown"])
+                    src_label = src[0] if isinstance(src, list) and src else src
+                    tgt_label = tgt[0] if isinstance(tgt, list) and tgt else tgt
+                    flags.append(
+                        f"🚨 LEGAL FLAG: Rule 'state_witness_corroboration' triggered on relation '{rel}' "
+                        f"between '{src_label}' and '{tgt_label}'. Action: NEEDS_ADDITIONAL_EVIDENCE."
+                    )
+                return flags
+            except Exception as e:
+                logger.error(f"[OntologyEngine] state_witness_corroboration rule check failed: {e}")
+                return []
 
-            elif match_type == "node":
-                for node in matched_nodes:
-                    try:
-                        if evaluator.evaluate(ast, {"node": node}):
-                            node_label = node.get("label", node.get("id", ""))
-                            insight = f"🚨 LEGAL FLAG: Rule '{rule['name']}' triggered on node '{node_label}'. Action: {flag_msg}."
-                            if insight not in flags:
-                                flags.append(insight)
-                    except Exception:
-                        # Silently skip if evaluation fails for a specific node
-                        pass
+        async def check_mens_rea():
+            query = (
+                "g.V().has('partitionKey', pk).has('type', 'Offense_Type').has('label', 'שוחד והפרת אמונים')"
+                ".where(__.inE().outV().has('type', 'Mens_Rea').count().is(0))"
+                ".project('id', 'label')"
+                ".by('id').by('label')"
+                ".limit(50)"
+            )
+            try:
+                results = await cosmos_mgr.execute_query(query, {"pk": pk})
+                flags = []
+                for item in results:
+                    lbl = val(item, "label")
+                    flags.append(
+                        f"🚨 LEGAL FLAG: Rule 'mens_rea_check' triggered on node '{lbl}'. "
+                        f"Action: INCOMPLETE_OFFENSE_ELEMENTS."
+                    )
+                return flags
+            except Exception as e:
+                logger.error(f"[OntologyEngine] mens_rea rule check failed: {e}")
+                return []
 
-        return flags
+        async def check_conflict_of_interest():
+            query = (
+                "g.E().has('partitionKey', pk).hasLabel('CONFLICT_OF_INTEREST')"
+                ".project('id', 'relation', 'source', 'target')"
+                ".by('id').by(label).by(outV().values('label').fold()).by(inV().values('label').fold())"
+                ".limit(50)"
+            )
+            try:
+                results = await cosmos_mgr.execute_query(query, {"pk": pk})
+                flags = []
+                for item in results:
+                    rel = val(item, "relation")
+                    src = val(item, "source", ["unknown"])
+                    tgt = val(item, "target", ["unknown"])
+                    src_label = src[0] if isinstance(src, list) and src else src
+                    tgt_label = tgt[0] if isinstance(tgt, list) and tgt else tgt
+                    flags.append(
+                        f"🚨 LEGAL FLAG: Rule 'conflict_of_interest_alert' triggered on relation '{rel}' "
+                        f"between '{src_label}' and '{tgt_label}'. Action: POTENTIAL_BRIBERY_OR_FRAUD."
+                    )
+                return flags
+            except Exception as e:
+                logger.error(f"[OntologyEngine] conflict_of_interest rule check failed: {e}")
+                return []
 
-    def _matches(self, expected: str, actual: str, field_type: str) -> bool:
-        """
-        Bilingual matching logic for rule evaluation.
+        async def check_investigative_corroboration():
+            query = (
+                "g.V().has('partitionKey', pk).has('type', 'Offense_Type')"
+                ".project('id', 'label')"
+                ".by('id').by('label')"
+                ".limit(50)"
+            )
+            try:
+                results = await cosmos_mgr.execute_query(query, {"pk": pk})
+                flags = []
+                for item in results:
+                    lbl = val(item, "label")
+                    flags.append(
+                        f"🚨 LEGAL FLAG: Rule 'investigative_corroboration' triggered on node '{lbl}'. "
+                        f"Action: REQUIRES_EVIDENCE_ANCHOR."
+                    )
+                return flags
+            except Exception as e:
+                logger.error(f"[OntologyEngine] investigative_corroboration rule check failed: {e}")
+                return []
 
-        Args:
-            expected: Expected value from the rule.
-            actual: Actual value from the graph.
-            field_type: Field type (e.g., 'class', 'relation', 'epistemic_state').
+        async def check_hearsay_offense():
+            query = (
+                "g.E().has('partitionKey', pk).has('epistemic_state', 'HEARSAY')"
+                ".where(inV().has('type', 'Offense_Type'))"
+                ".project('id', 'relation', 'source', 'target')"
+                ".by('id').by(label).by(outV().values('label').fold()).by(inV().values('label').fold())"
+                ".limit(50)"
+            )
+            try:
+                results = await cosmos_mgr.execute_query(query, {"pk": pk})
+                flags = []
+                for item in results:
+                    rel = val(item, "relation")
+                    src = val(item, "source", ["unknown"])
+                    tgt = val(item, "target", ["unknown"])
+                    src_label = src[0] if isinstance(src, list) and src else src
+                    tgt_label = tgt[0] if isinstance(tgt, list) and tgt else tgt
+                    flags.append(
+                        f"🚨 LEGAL FLAG: Rule 'hearsay_offense_rule' triggered on relation '{rel}' "
+                        f"between '{src_label}' and '{tgt_label}'. Action: INVALID_EVIDENCE_TYPE."
+                    )
+                return flags
+            except Exception as e:
+                logger.error(f"[OntologyEngine] hearsay_offense rule check failed: {e}")
+                return []
 
-        Returns:
-            True if values match according to schema mappings.
-        """
-        if not expected or not actual:
-            return False
+        # Run checks in parallel
+        check_tasks = [
+            check_hearsay(),
+            check_accomplice_corroboration(),
+            check_state_witness_corroboration(),
+            check_mens_rea(),
+            check_conflict_of_interest(),
+            check_investigative_corroboration(),
+            check_hearsay_offense()
+        ]
 
-        expected = str(expected).strip().lower()
-        actual = str(actual).strip().lower()
+        all_results = await asyncio.gather(*check_tasks)
+        flattened_flags = [flag for sublist in all_results for flag in sublist]
 
-        if expected == actual:
-            return True
-
-        # Bilingual logic using schema mappings
-        if field_type == "epistemic_state":
-            for eng, heb in self.schema.get("confidence_levels", {}).items():
-                if eng.lower() == expected and heb.lower() == actual:
-                    return True
-
-        if field_type == "class":
-            # Check localized HEBREW_TYPE_MAP
-            for eng, heb in HEBREW_TYPE_MAP.items():
-                if eng.lower() == expected and heb.lower() == actual:
-                    return True
-            # Check legal_role_map
-            for eng, heb_list in self.schema.get("legal_role_map", {}).items():
-                if eng.lower() == expected:
-                    if any(heb.lower() == actual for heb in heb_list):
-                        return True
-
-        if field_type == "relation":
-            for eng, heb in self.schema.get("relation_types", {}).items():
-                if eng.lower() == expected and heb.lower() == actual:
-                    return True
-
-        return False
+        logger.info(f"[OntologyEngine] Pushdown checks complete. Triggered {len(flattened_flags)} flags.")
+        return list(set(flattened_flags))
