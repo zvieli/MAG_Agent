@@ -1,0 +1,61 @@
+services:
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite:latest
+    ports:
+      - "10000:10000"
+      - "10001:10001"
+      - "10002:10002"
+      - "7071:80"
+    # standard well-known key for Azurite
+    command: azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --tableHost 0.0.0.0 --skipApiVersionCheck
+    healthcheck:
+      test: ["CMD-SHELL", "ls /data/__azurite_db_blob__.json || exit 0"]
+      interval: 1s
+      timeout: 1s
+      retries: 30
+
+  function-app:
+    build: .
+    env_file:
+      - .env
+    network_mode: "service:azurite"
+    volumes:
+      - .:/home/site/wwwroot
+    depends_on:
+      azurite:
+        condition: service_healthy
+    environment:
+      CORS_ALLOWED_ORIGINS: '["https://tikshuv.sharepoint.com", "https://localhost:4321"]'
+      CORS_SUPPORT_CREDENTIALS: "true"
+      AzureFunctionsJobHost__Host__CORS__0: "https://tikshuv.sharepoint.com"
+      AzureFunctionsJobHost__Host__CORS__1: "https://localhost:4321"
+      AzureFunctionsJobHost__Host__CORSCredentials: "true"
+      AZURE_FUNCTIONS_ENVIRONMENT: "Development"
+      ASPNETCORE_ENVIRONMENT: "Development"
+      FUNCTIONS_WORKER_RUNTIME: "python"
+      AzureWebJobsFeatureFlags: "EnableRetryPolicy"
+      LOG_LEVEL: "DEBUG"
+      PYTHON_ENABLE_WORKER_EXTENSIONS: "1"
+      PYTHONPATH: "/home/site/wwwroot"
+      WEBSITE_HOSTNAME: "localhost:7071"
+      FUNCTIONS_WORKER_PROCESS_COUNT: "1"
+      PYTHON_THREADPOOL_THREAD_COUNT: "20"
+      FUNCTIONS_EXTENSION_VERSION: "~4"
+      SKIP_SCHEMA_LOAD_DURING_IMPORT: "true"
+      PYTHONUNBUFFERED: "1"
+      AzureWebJobsScriptRoot: "/home/site/wwwroot/src/operations"
+      TIKTOKEN_CACHE_DIR: "/var/tmp/tiktoken_cache"
+      # standard Azurite connection string using 127.0.0.1 (works with network_mode: service:azurite)
+      AzureWebJobsStorage: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;"
+      AzureStorageConnection: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;"
+      AZURE_STORAGE_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;"
+    healthcheck:
+      test: ["CMD-SHELL", "python3 -c \"import urllib.request, sys; resp = urllib.request.urlopen('http://localhost/api/health'); sys.exit(0 if resp.status == 200 else 1)\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+networks:
+  app-network:
+    driver: bridge

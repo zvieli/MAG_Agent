@@ -1,0 +1,49 @@
+# Output & Temp
+deployment.zip
+graphify-out/
+__pycache__/
+.venv/
+venv/
+azurite_data/
+.DS_Store
+.vscode/
+.mypy_cache/
+.ruff_cache/
+data/
+# Azure Functions generated metadata (v1 compat)
+src/operations/*/
+src/operations/generated_function_entrypoints.py
+src/operations/host.json
+
+# Secrets & Local Config
+.env
+local.settings.json
+azure_app_settings.json
+*.secret
+*.token
+*.key
+
+# Terraform
+infra/.terraform/
+infra/*.tfstate
+infra/*.tfstate.*
+infra/terraform.tfvars
+infra/terraform.tfvars.json
+
+# Keep templates tracked (ensure they are NOT ignored)
+!.env.example
+!local.settings.example.json
+!azure_app_settings.template.json
+.agents
+
+# Frontend
+frontend/*/node_modules/
+frontend/*/lib/
+frontend/*/dist/
+frontend/*/temp/
+frontend/*/release/
+frontend/*/solution/*.sppkg
+frontend/mag-spfx/sharepoint
+.codex
+downloads
+frontend/app/.env.local

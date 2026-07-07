@@ -1,0 +1,12 @@
+{
+  "@microsoft/generator-sharepoint": {
+    "version": "1.23.0",
+    "libraryName": "mag-spfx",
+    "libraryId": "d6fd11cf-2851-4d5c-9610-ae0d35c88ae4",
+    "environment": "spo",
+    "packageManager": "npm",
+    "isCreatingSolution": true,
+    "isDomainIsolated": false,
+    "componentType": "webpart"
+  }
+}

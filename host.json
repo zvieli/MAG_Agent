@@ -1,0 +1,33 @@
+{
+  "version": "2.0",
+  "logging": {
+    "logLevel": {
+      "default": "Information",
+      "Host.Startup": "Trace",
+      "Host.Triggers.DurableTask": "Trace",
+      "Function": "Trace",
+      "Azure.Storage": "Debug",
+      "Azure.Core": "Information"
+    },
+    "applicationInsights": {
+      "samplingSettings": {
+        "isEnabled": true,
+        "excludedTypes": "Request"
+      },
+      "enableLiveMetricsFilters": true
+    }
+  },
+  "extensionBundle": {
+    "id": "Microsoft.Azure.Functions.ExtensionBundle",
+    "version": "[4.*, 5.0.0)"
+  },
+  "extensions": {
+    "durableTask": {
+      "hubName": "TestHubName",
+      "storageProvider": {
+        "connectionStringName": "AzureStorageConnection"
+      }
+    }
+  },
+  "functionTimeout": "00:30:00"
+}

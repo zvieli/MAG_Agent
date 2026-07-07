@@ -1,0 +1,37 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx/client-side-web-part-manifest.schema.json",
+  "id": "59916776-40f5-4f23-9549-aa3ff16f4c87",
+  "alias": "MagAppWebPart",
+  "componentType": "WebPart",
+  "version": "*",
+  "manifestVersion": 2,
+  "requiresCustomScript": false,
+  "supportedHosts": [
+    "SharePointWebPart",
+    "TeamsPersonalApp",
+    "TeamsTab"
+  ],
+  "supportsThemeVariants": true,
+  "preconfiguredEntries": [
+    {
+      "groupId": "5c03119e-3074-46fd-976b-c60198311f70",
+      "group": {
+        "default": "ניהול תיקי חקירה"
+      },
+      "title": {
+        "default": "מערכת ניתוח תיקי חקירה"
+      },
+      "description": {
+        "default": "העלאת מסמכים, ניתוח גרף ידע, דו\"ח ושיחה עם סוכן חקירה."
+      },
+      "officeFabricIconFontName": "AnalyticsReport",
+      "properties": {
+        "apiBaseUrl": "https://homkeyhakera-lagend-e7cafje6hyhfdyfk.westeurope-01.azurewebsites.net",
+        "functionKey": "",
+        "useMockData": false,
+        "pollIntervalMs": 5000,
+        "enableDebugLogs": true
+      }
+    }
+  ]
+}

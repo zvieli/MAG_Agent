@@ -1,0 +1,142 @@
+import * as React from 'react';
+import * as ReactDom from 'react-dom';
+import { Version } from '@microsoft/sp-core-library';
+import {
+  IPropertyPaneConfiguration,
+  PropertyPaneSlider,
+  PropertyPaneTextField,
+  PropertyPaneToggle
+} from '@microsoft/sp-property-pane';
+import { BaseClientSideWebPart } from '@microsoft/sp-webpart-base';
+
+import * as strings from 'MagAppWebPartStrings';
+import { MagApp } from './components/MagApp';
+import { MagAppConfig } from './domain/types';
+
+export interface IMagAppWebPartProps {
+  apiBaseUrl: string;
+  functionKey: string;
+  useMockData: boolean;
+  pollIntervalMs: number;
+  enableDebugLogs: boolean;
+}
+
+export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartProps> {
+  public render(): void {
+    let apiBaseUrl = this.properties.apiBaseUrl || '';
+    let functionKey = this.properties.functionKey || '';
+    let useMockData = this.properties.useMockData !== false;
+    let pollIntervalMs = this.properties.pollIntervalMs || 3000;
+
+    let isLocalDocker = false;
+    let envApiTarget: string | undefined = undefined;
+    let envFunctionKey: string | undefined = undefined;
+    let envUseMockData: string | undefined = undefined;
+    let envPollIntervalMs: string | undefined = undefined;
+
+    try {
+      isLocalDocker = process.env.VITE_USE_LOCAL_DOCKER === 'true';
+    } catch (e) { /* process is not defined */ }
+
+    try {
+      envApiTarget = process.env.VITE_API_TARGET;
+    } catch (e) { /* process is not defined */ }
+
+    try {
+      envFunctionKey = process.env.FUNCTION_KEY;
+    } catch (e) { /* process is not defined */ }
+
+    try {
+      envUseMockData = process.env.VITE_USE_MOCK_DATA;
+    } catch (e) { /* process is not defined */ }
+
+    try {
+      envPollIntervalMs = process.env.VITE_POLL_INTERVAL_MS;
+    } catch (e) { /* process is not defined */ }
+
+    if (isLocalDocker) {
+      apiBaseUrl = 'http://localhost:7071';
+      functionKey = envFunctionKey || '';
+    } else {
+      if (envApiTarget) {
+        apiBaseUrl = envApiTarget;
+      }
+      if (envFunctionKey) {
+        functionKey = envFunctionKey;
+      }
+    }
+
+    if (envUseMockData !== undefined) {
+      useMockData = envUseMockData === 'true';
+    }
+
+    if (envPollIntervalMs !== undefined) {
+      const val = parseInt(envPollIntervalMs, 10);
+      if (!isNaN(val)) {
+        pollIntervalMs = val;
+      }
+    }
+
+    const config: MagAppConfig = {
+      apiBaseUrl,
+      functionKey,
+      useMockData,
+      pollIntervalMs,
+      enableDebugLogs: this.properties.enableDebugLogs === true
+    };
+
+    const element = React.createElement(MagApp, { config });
+    ReactDom.render(element, this.domElement);
+  }
+
+  protected onDispose(): void {
+    ReactDom.unmountComponentAtNode(this.domElement);
+  }
+
+  protected get dataVersion(): Version {
+    return Version.parse('1.0');
+  }
+
+  protected getPropertyPaneConfiguration(): IPropertyPaneConfiguration {
+    return {
+      pages: [
+        {
+          header: {
+            description: strings.PropertyPaneDescription
+          },
+          groups: [
+            {
+              groupName: 'חיבור למערכת',
+              groupFields: [
+                PropertyPaneTextField('apiBaseUrl', {
+                  label: strings.ApiBaseUrlFieldLabel,
+                  placeholder: 'https://<function-app>.azurewebsites.net'
+                }),
+                PropertyPaneTextField('functionKey', {
+                  label: strings.FunctionKeyFieldLabel,
+                  placeholder: 'הדבק מפתח בדיקה'
+                }),
+                PropertyPaneToggle('useMockData', {
+                  label: strings.UseMockDataFieldLabel,
+                  onText: 'נתוני דמה',
+                  offText: 'ממשק חי'
+                }),
+                PropertyPaneSlider('pollIntervalMs', {
+                  label: strings.PollIntervalFieldLabel,
+                  min: 1000,
+                  max: 15000,
+                  step: 500
+                }),
+                PropertyPaneToggle('enableDebugLogs', {
+                  label: strings.EnableDebugLogsFieldLabel,
+                  onText: 'מופעל',
+                  offText: 'כבוי'
+                })
+              ]
+            }
+          ]
+        }
+      ]
+    };
+  }
+}

@@ -1,0 +1,594 @@
+import json
+import logging
+import asyncio
+import os
+from pathlib import Path
+from typing import Any, Dict, List
+
+from src.utils.config import settings
+from src.storage.factory import (
+    get_artifact_store,
+    get_search_manager,
+    get_cosmos_manager,
+)
+from src.storage.interfaces import IArtifactStore
+from src.extraction.extraction_engine import _build_azure_client
+from src.extraction.extraction_engine import extract_from_chunk
+from src.processing.document_processor import (
+    _load_document_pages,
+    _load_document_pages_via_di,
+    _build_discrete_chunks,
+)
+from src.models.models import RawGraphExtraction, SCHEMA_CONFIG
+from src.storage.search_manager import SearchManager
+from src.processing.strategies import DefaultEntityResolver, DefaultReporter
+from src.graph.local_graphify import build_from_json, cluster
+from src.reporting.report_generator import summarize_communities
+from src.processing.persistence_manager import PersistenceManager
+from src.storage.blob_storage import AzureBlobStorage
+
+
+def _compact_error(exc: Exception | str, *, limit: int = 3000) -> str:
+    message = str(exc)
+    if len(message) <= limit:
+        return message
+    return f"{message[:limit]}... [truncated; original length={len(message)} chars]"
+
+
+def _get_artifact_store() -> IArtifactStore:
+    return get_artifact_store()
+
+
+MERGE_ARTIFACT_CONCURRENCY = max(
+    1, int(os.getenv("MERGE_ARTIFACT_CONCURRENCY", "8"))
+)
+
+
+def _doc_id_from_blob_path(blob_path: str) -> str:
+    return Path(blob_path).stem
+
+
+def _chunk_manifest_path(doc_id: str) -> str:
+    return f"chunks/{doc_id}/list.json"
+
+
+def _chunk_artifact_path(doc_id: str, chunk_id: str) -> str:
+    return f"chunks/{doc_id}/{chunk_id}.json"
+
+
+def _extraction_artifact_path(doc_id: str, chunk_id: str) -> str:
+    return f"extracted/{doc_id}/{chunk_id}.json"
+
+
+def _partial_graph_path(doc_id: str) -> str:
+    return f"graph/{doc_id}/partial.json"
+
+
+def _final_graph_path(doc_id: str) -> str:
+    return f"graph/{doc_id}/final.json"
+
+
+def _extracted_text_path(doc_id: str) -> str:
+    return f"extracted_text/{doc_id}.md"
+
+
+class _ArtifactPersistence:
+    def __init__(self, artifact_store: IArtifactStore):
+        self.artifact_store = artifact_store
+
+    async def save_json(self, data: Any, filename: str, indent: int = 2):
+        await asyncio.to_thread(
+            self.artifact_store.write_bytes,
+            filename,
+            json.dumps(data, ensure_ascii=False, indent=indent).encode("utf-8"),
+        )
+
+
+async def _generate_embeddings(texts: List[str]) -> List[List[float]]:
+    import random
+    try:
+        from openai import RateLimitError
+    except ImportError:
+        RateLimitError = None
+
+    if not texts:
+        return []
+    client = _build_azure_client()
+    model = (
+        settings.azure_openai_embedding_deployment
+        or settings.azure_openai_embedding_model
+        or settings.openai_embedding_model
+    )
+    
+    max_attempts = 5
+    backoff = 1.0
+    for attempt in range(max_attempts):
+        try:
+            response = await asyncio.wait_for(
+                client.embeddings.create(input=texts, model=model),
+                timeout=settings.llm_request_timeout_seconds,
+            )
+            return [item.embedding for item in response.data]
+        except (asyncio.TimeoutError, Exception) as e:
+            if attempt == max_attempts - 1:
+                logging.error(f"Failed to generate embeddings after {max_attempts} attempts: {e}")
+                if isinstance(e, asyncio.TimeoutError):
+                    raise TimeoutError(
+                        f"OpenAI embedding request timed out after {settings.llm_request_timeout_seconds:.1f}s"
+                    ) from e
+                raise
+            
+            is_rate_limit = False
+            if RateLimitError and isinstance(e, RateLimitError):
+                is_rate_limit = True
+            elif hasattr(e, "status_code") and e.status_code == 429:
+                is_rate_limit = True
+
+            if is_rate_limit:
+                sleep_time = min(30.0, 2.0 * (2 ** attempt)) + random.uniform(0, 1.0)
+                logging.warning(f"Embedding call rate limited (429): {e}. Retrying in {sleep_time:.1f}s (attempt {attempt + 1}/{max_attempts})...")
+            else:
+                sleep_time = backoff * (2 ** attempt) + random.uniform(0, 0.5)
+                logging.warning(f"Embedding call failed: {e}. Retrying in {sleep_time:.1f}s (attempt {attempt + 1}/{max_attempts})...")
+            
+            await asyncio.sleep(sleep_time)
+
+
+async def _index_edge_labels(
+    graph_data: Dict[str, Any], filename: str, persistence: Any
+) -> None:
+    logging.info("[ACTIVITY][FINAL_INDEXING] Edge label indexing to AI Search is disabled per design.")
+    return
+
+
+async def _index_chunks(doc_id: str, chunks: List[Dict[str, Any]]) -> None:
+    if (
+        not getattr(settings, "use_azure_search", False)
+        or not settings.azure_search_endpoint
+    ):
+        return
+
+    logging.info("[ACTIVITY][CHUNKING] Indexing %d chunks to AI Search", len(chunks))
+    
+    batch_size = max(1, int(getattr(settings, "azure_search_batch_size", 20)))
+    search_mgr = get_search_manager()
+    await search_mgr.ensure_investigation_indices()
+
+    semaphore = asyncio.Semaphore(5)
+
+    async def index_batch(batch_idx: int, chunk_batch: List[Dict[str, Any]]) -> None:
+        async with semaphore:
+            texts = [c["text"] for c in chunk_batch]
+            embeddings = await _generate_embeddings(texts)
+            if not embeddings:
+                logging.warning(f"Failed to generate embeddings for batch {batch_idx}")
+                return
+
+            documents = []
+            for j, chunk in enumerate(chunk_batch):
+                documents.append(
+                    {
+                        "id": SearchManager._sanitize_id(f"{doc_id}_{chunk['chunk_index']}"),
+                        "text": chunk["text"],
+                        "embedding": embeddings[j],
+                        "source_file": doc_id,
+                    }
+                )
+            await search_mgr.upload_documents(settings.azure_search_index, documents)
+
+    tasks = []
+    for i in range(0, len(chunks), batch_size):
+        chunk_batch = chunks[i : i + batch_size]
+        batch_idx = (i // batch_size) + 1
+        tasks.append(index_batch(batch_idx, chunk_batch))
+
+    if tasks:
+        await asyncio.gather(*tasks)
+
+
+async def _index_nodes(doc_id: str, nodes: List[Dict[str, Any]]) -> None:
+    logging.info("[ACTIVITY][FINAL_INDEXING] Node indexing to AI Search is disabled per design.")
+    return
+
+
+async def run_evaluation_activity(payload: Dict[str, Any]) -> Dict[str, Any]:
+    return {"status": "success"}
+
+
+async def run_chunking(
+    payload: Dict[str, Any], artifact_store: IArtifactStore | None = None
+) -> Dict[str, Any]:
+    store = artifact_store or _get_artifact_store()
+    input_blob_path = payload["input_blob_path"]
+    doc_id = _doc_id_from_blob_path(input_blob_path)
+
+    if str(input_blob_path).lower().endswith(".pdf"):
+        file_bytes = await asyncio.to_thread(store.read_bytes, input_blob_path)
+        logging.info(
+            "[ACTIVITY][CHUNKING] read bytes | blob_path=%s | file_size_bytes=%d",
+            input_blob_path,
+            len(file_bytes) if file_bytes else 0,
+        )
+
+        if file_bytes and not file_bytes.startswith(b"%PDF"):
+            logging.error(
+                "[ACTIVITY][CHUNKING] Payload is not a valid PDF! First 10 bytes: %s",
+                file_bytes[:10],
+            )
+
+        pages = await _load_document_pages_via_di(file_bytes)
+    else:
+        pages = await asyncio.to_thread(_load_document_pages, input_blob_path, store)
+
+    chunks = _build_discrete_chunks(pages)
+
+    # 1. Generate and save Unified Markdown Artifact (Ground Truth)
+    md_content = []
+    for p in pages:
+        md_content.append(f"## Page {p['page_number']}\n\n{p['text']}\n")
+
+    full_md_text = "\n".join(md_content)
+    md_path = _extracted_text_path(doc_id)
+    await asyncio.to_thread(store.write_bytes, md_path, full_md_text.encode("utf-8"))
+    logging.info("[ACTIVITY][CHUNKING] Unified Markdown created: %s", md_path)
+
+    # 2. Inject doc_id and source_blob_path into chunks for in-memory flow
+    for chunk in chunks:
+        chunk["doc_id"] = doc_id
+        chunk["source_blob_path"] = input_blob_path
+
+    await _index_chunks(doc_id, chunks)
+
+    # Claim-check: Save individual chunk payloads and manifest to storage
+    logging.info(f"[ACTIVITY][CHUNKING] Starting materialization for {len(chunks)} chunks")
+    persistence = _ArtifactPersistence(store)
+    semaphore = asyncio.Semaphore(5)
+
+    async def save_chunk_with_sem(chunk_data, path):
+        async with semaphore:
+            await persistence.save_json(chunk_data, path)
+
+    save_tasks = []
+    chunk_ids = []
+    for chunk in chunks:
+        chunk_id = str(chunk["chunk_index"]).zfill(5)
+        chunk_ids.append(chunk_id)
+        save_tasks.append(
+            save_chunk_with_sem(chunk, _chunk_artifact_path(doc_id, chunk_id))
+        )
+    
+    # Save manifest list
+    manifest = [
+        {"chunk_id": cid, "chunk_index": idx}
+        for idx, cid in enumerate(chunk_ids, start=1)
+    ]
+    save_tasks.append(
+        save_chunk_with_sem(manifest, _chunk_manifest_path(doc_id))
+    )
+
+    if save_tasks:
+        await asyncio.gather(*save_tasks)
+
+    return {
+        "doc_id": doc_id,
+        "chunk_ids": chunk_ids,
+        "total_chunks": len(chunks)
+    }
+
+
+async def activity_chunking(blob_path: str) -> Dict[str, Any]:
+    try:
+        store = _get_artifact_store()
+        doc_id = _doc_id_from_blob_path(blob_path)
+        logging.info(
+            "[ACTIVITY][CHUNKING] start | blob_path=%s | doc_id=%s", blob_path, doc_id
+        )
+        chunk_meta = await run_chunking({"input_blob_path": blob_path}, store)
+
+        logging.info(
+            "[ACTIVITY][CHUNKING] complete | doc_id=%s | chunks=%d",
+            doc_id,
+            chunk_meta["total_chunks"],
+        )
+        return chunk_meta
+    except Exception as e:
+        import traceback
+        error_msg = _compact_error(
+            f"Error in activity_chunking: {type(e).__name__} - {e}"
+        )
+        logging.error(error_msg)
+        logging.error(traceback.format_exc())
+        raise RuntimeError(error_msg)
+
+
+async def activity_extract_chunk(payload: Dict[str, Any]) -> Dict[str, Any]:
+    try:
+        store = _get_artifact_store()
+        
+        if "text" in payload:
+            # Backward compatibility / Direct chunk dictionary passed
+            chunk_data = payload
+            doc_id = chunk_data.get("doc_id", "unknown")
+            chunk_id = str(chunk_data.get("chunk_index", "0")).zfill(5)
+        else:
+            # Claim-Check reference pattern
+            doc_id = payload["doc_id"]
+            chunk_id = payload["chunk_id"]
+
+            # Load chunk data from store
+            chunk_path = _chunk_artifact_path(doc_id, chunk_id)
+            bytes_data = await asyncio.to_thread(store.read_bytes, chunk_path)
+            chunk_data = json.loads(bytes_data.decode("utf-8"))
+
+        text = chunk_data["text"]
+        chunk_idx = chunk_data.get("chunk_index", "0")
+
+        extraction, token_usage = await extract_from_chunk(
+            None,
+            text,
+            SCHEMA_CONFIG,
+            chunk_label=str(chunk_idx).zfill(5),
+            artifact_store=store,
+        )
+
+        result_payload = {
+            "doc_id": doc_id,
+            "chunk_id": chunk_id,
+            "extraction": extraction.model_dump(),
+            "token_usage": token_usage,
+        }
+
+        return result_payload
+    except Exception as e:
+        import traceback
+        error_msg = _compact_error(
+            f"Error in activity_extract_chunk: {type(e).__name__} - {e}"
+        )
+        logging.error(error_msg)
+        logging.error(traceback.format_exc())
+        raise RuntimeError(error_msg)
+
+
+async def activity_merge_partials(
+    extraction_results: List[Dict[str, Any]],
+) -> str:
+    try:
+        store = _get_artifact_store()
+        logging.info("[ACTIVITY][MERGE_PARTIALS] input_count=%s", len(extraction_results))
+        all_nodes: list[dict[str, Any]] = []
+        all_edges: list[dict[str, Any]] = []
+        doc_id = "unknown"
+
+        for result_data in extraction_results:
+            doc_id = result_data.get("doc_id", doc_id)
+            chunk_id = result_data.get("chunk_id", "unknown")
+            extraction = RawGraphExtraction.model_validate(
+                result_data.get("extraction", {})
+            )
+            for node in extraction.nodes:
+                d = node.model_dump()
+                d["source_file"] = doc_id
+                d["source_location"] = f"Chunk {chunk_id}"
+                all_nodes.append(d)
+            for edge in extraction.edges:
+                d = edge.model_dump()
+                d["source_file"] = doc_id
+                d["source_location"] = f"Chunk {chunk_id}"
+                all_edges.append(d)
+
+        resolver = DefaultEntityResolver(SCHEMA_CONFIG)
+        resolved_nodes, resolved_edges, report = await resolver.resolve(all_nodes, all_edges)
+
+        graph_data = {
+            "nodes": resolved_nodes,
+            "edges": resolved_edges,
+            "metadata": {
+                "doc_id": doc_id,
+                "entity_resolution_report": report,
+            },
+        }
+
+        merged_graph_path = f"graph/{doc_id}/partial.json"
+        graph_bytes = json.dumps(graph_data, indent=2, ensure_ascii=False).encode("utf-8")
+        await asyncio.to_thread(store.write_bytes, merged_graph_path, graph_bytes)
+
+        logging.info(f"[ACTIVITY][MERGE_PARTIALS] Merged graph written to {merged_graph_path}")
+        return merged_graph_path
+    except Exception as e:
+        import traceback
+        error_msg = _compact_error(
+            f"Error in activity_merge_partials: {type(e).__name__} - {e}"
+        )
+        logging.error(error_msg)
+        logging.error(traceback.format_exc())
+        raise RuntimeError(error_msg)
+
+
+async def activity_final_indexing(merged_graph_path: str) -> str:
+    try:
+        store = _get_artifact_store()
+
+        # Load merged graph from blob (Claim-Check)
+        logging.info(f"[ACTIVITY][FINAL_INDEXING] Loading merged graph from {merged_graph_path}")
+        graph_bytes = await asyncio.to_thread(store.read_bytes, merged_graph_path)
+        graph_data = json.loads(graph_bytes.decode("utf-8"))
+
+        doc_id = (
+            graph_data.get("metadata", {}).get("doc_id")
+            or graph_data.get("metadata", {}).get("source_file")
+            or "unknown"
+        )
+        cosmos_uri = f"cosmos://{doc_id}"
+
+        # 0. Run community detection first to populate "community" property on nodes
+        communities = {}
+        hierarchy = {}
+        G = None
+        try:
+            logging.info("[ACTIVITY][FINAL_INDEXING] Running community detection before Cosmos DB sync...")
+            G = build_from_json(graph_data)
+            communities, hierarchy = await asyncio.to_thread(cluster, G)
+            
+            # Map node ID to community ID
+            node_to_comm = {}
+            for comm_id, members in communities.items():
+                for member in members:
+                    node_to_comm[str(member)] = comm_id
+            
+            # Update community property on nodes in graph_data
+            for node in graph_data.get("nodes", []):
+                nid = str(node.get("id"))
+                if nid in node_to_comm:
+                    node["community"] = node_to_comm[nid]
+        except Exception as e:
+            logging.error(f"[ACTIVITY][FINAL_INDEXING] Community pre-detection failed: {e}")
+
+        # 1. Sync to Cosmos DB
+        if settings.cosmos_gremlin_endpoint:
+            cosmos_mgr = get_cosmos_manager()
+            try:
+                await cosmos_mgr.sync_graph(graph_data)
+            except Exception as e:
+                logging.error(f"[ACTIVITY][FINAL_INDEXING] Cosmos DB sync failed: {e}")
+                raise
+
+        # 2. Sync to AI Search (Nodes)
+        await _index_nodes(doc_id, graph_data.get("nodes", []))
+
+        # 3. Sync to AI Search (Edge Labels)
+        await _index_edge_labels(
+            graph_data,
+            f"indexes/{doc_id}/edge_embeddings.json",
+            _ArtifactPersistence(store),
+        )
+
+        # Persist the final enriched graph for diagnostics and replay. The partial
+        # artifact is deleted later; final.json is intentionally retained.
+        final_graph_path = _final_graph_path(doc_id)
+        final_graph_bytes = json.dumps(graph_data, indent=2, ensure_ascii=False).encode("utf-8")
+        await asyncio.to_thread(store.write_bytes, final_graph_path, final_graph_bytes)
+        logging.info("[ACTIVITY][FINAL_INDEXING] Final graph written to %s", final_graph_path)
+
+        # 4. Generate community summaries and markdown report
+        try:
+            logging.info("[ACTIVITY][FINAL_INDEXING] Generating community summaries and reports...")
+            if G is None:
+                G = build_from_json(graph_data)
+                communities, hierarchy = await asyncio.to_thread(cluster, G)
+
+            community_labels = {}
+            summaries = await summarize_communities(G, communities, community_labels)
+            
+            # Save summaries and hierarchy mapping
+            payload = {
+                "summaries": summaries,
+                "hierarchy": hierarchy
+            }
+            summaries_json = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+            await asyncio.to_thread(store.write_bytes, f"graph/{doc_id}/community_summaries.json", summaries_json)
+            await asyncio.to_thread(store.write_bytes, "graph/latest/community_summaries.json", summaries_json)
+            await asyncio.to_thread(store.write_bytes, "community_summaries.json", summaries_json)
+
+            # Load raw text to count words
+            raw_text = ""
+            try:
+                md_path = _extracted_text_path(doc_id)
+                if await asyncio.to_thread(store.exists, md_path):
+                    md_bytes = await asyncio.to_thread(store.read_bytes, md_path)
+                    raw_text = md_bytes.decode("utf-8")
+            except Exception as e:
+                logging.warning(f"Could not load extracted text for word count: {e}")
+
+            pages = [{"text": raw_text}]
+
+            conn_str = settings.azure_storage_connection_string or "UseDevelopmentStorage=true"
+            container_name = settings.azure_storage_container or "graphify-out"
+            blob_storage = AzureBlobStorage(connection_string=conn_str, container_name=container_name)
+
+            # Generate report to root of container
+            persistence_root = PersistenceManager(blob_storage, base_blob_path="")
+            reporter_root = DefaultReporter(persistence_root)
+            await reporter_root.generate(G, communities, graph_data, pages, doc_id)
+
+            # Copy report & HTML to doc_id folder for historical tracking
+            persistence_nested = PersistenceManager(blob_storage, base_blob_path=f"graph/{doc_id}")
+            reporter_nested = DefaultReporter(persistence_nested)
+            await reporter_nested.generate(G, communities, graph_data, pages, doc_id)
+            
+            logging.info("[ACTIVITY][FINAL_INDEXING] Successfully generated community summaries and markdown report.")
+        except Exception as e:
+            logging.error(f"[ACTIVITY][FINAL_INDEXING] Failed to run reporting and community summaries: {e}", exc_info=True)
+
+        # Immediate Cleanup: Delete the partial merged graph now that indexing is complete
+        try:
+            await asyncio.to_thread(store.delete, merged_graph_path)
+            logging.debug(f"[CLEANUP] Deleted partial merged graph: {merged_graph_path}")
+        except Exception as e:
+            logging.warning(f"[CLEANUP] Failed to delete merged graph {merged_graph_path}: {e}")
+
+        # Idempotent cleanup of temporary chunk and extracted folders, as well as uploads and caches for stateless design
+        try:
+            for folder_prefix in [f"chunks/{doc_id}", f"extracted/{doc_id}", "uploads", "extraction_cache"]:
+                await asyncio.to_thread(store.delete_folder, folder_prefix)
+            logging.info(f"Successfully cleaned up temporary artifacts for {doc_id}")
+        except Exception as e:
+            logging.warning(f"[CLEANUP] Failed to clean up temporary artifacts for {doc_id}: {e}")
+
+        logging.info("[ACTIVITY][FINAL_INDEXING] complete | cosmos_uri=%s", cosmos_uri)
+        return cosmos_uri
+    except Exception as e:
+        import traceback
+        error_msg = _compact_error(
+            f"Error in activity_final_indexing: {type(e).__name__} - {e}"
+        )
+        logging.error(error_msg)
+        logging.error(traceback.format_exc())
+        raise RuntimeError(error_msg)
+
+
+async def run_extraction(payload: Dict[str, Any]) -> Dict[str, Any]:
+    logging.warning("[ACTIVITY][STUB] run_extraction called but not implemented. Returning empty dict.")
+    return {}
+
+
+async def run_resolution_and_inference(payload: Dict[str, Any]) -> str:
+    logging.warning("[ACTIVITY][STUB] run_resolution_and_inference called but not implemented. Returning default path.")
+    return "graph.json"
+
+
+async def run_analysis_and_reporting(payload: Dict[str, Any]) -> Dict[str, Any]:
+    logging.warning("[ACTIVITY][STUB] run_analysis_and_reporting called but not implemented. Returning default paths.")
+    return {"graph_path": "graph.json", "report_path": "report.md"}
+
+
+async def activity_cleanup_failed_run(payload: Dict[str, Any]) -> None:
+    doc_id = payload["doc_id"]
+    logging.info(f"[ACTIVITY][CLEANUP_FAILED_RUN][START] Cleaning up resources for failed pipeline doc_id: {doc_id}")
+    
+    # 1. Clean up temporary files in storage
+    try:
+        store = _get_artifact_store()
+        # Delete temporary chunk files
+        chunk_prefix = f"chunks/{doc_id}"
+        await asyncio.to_thread(store.delete_folder, chunk_prefix)
+        logging.info(f"[ACTIVITY][CLEANUP_FAILED_RUN] Cleaned up storage folder: {chunk_prefix}")
+        
+        # Delete partial graph if it exists
+        partial_path = f"graph/{doc_id}/partial.json"
+        if await asyncio.to_thread(store.exists, partial_path):
+            await asyncio.to_thread(store.delete, partial_path)
+            logging.info(f"[ACTIVITY][CLEANUP_FAILED_RUN] Deleted partial graph: {partial_path}")
+    except Exception as e:
+        logging.error(f"[ACTIVITY][CLEANUP_FAILED_RUN] Storage cleanup failed: {e}")
+
+    # 2. Clean up partially synchronized data in Cosmos DB
+    if settings.cosmos_gremlin_endpoint:
+        try:
+            cosmos_mgr = get_cosmos_manager()
+            logging.info(f"[ACTIVITY][CLEANUP_FAILED_RUN] Deleting partially synced Cosmos DB nodes/edges for doc_id: {doc_id}")
+            # Cosmos partition key is doc_id
+            query = "g.V().has('partitionKey', pk).drop()"
+            await cosmos_mgr.execute_query(query, {"pk": doc_id})
+            logging.info(f"[ACTIVITY][CLEANUP_FAILED_RUN] Dropped Gremlin partition for: {doc_id}")
+        except Exception as e:
+            logging.error(f"[ACTIVITY][CLEANUP_FAILED_RUN] Cosmos DB cleanup failed: {e}")

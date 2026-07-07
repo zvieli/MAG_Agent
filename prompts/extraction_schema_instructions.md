@@ -1,0 +1,1 @@
+Strictly extract entities following the schema types: {entity_types_str}.

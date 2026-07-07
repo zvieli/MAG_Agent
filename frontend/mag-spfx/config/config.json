@@ -1,0 +1,18 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/config.2.0.schema.json",
+  "version": "2.0",
+  "bundles": {
+    "mag-app-web-part": {
+      "components": [
+        {
+          "entrypoint": "./lib/webparts/magApp/MagAppWebPart.js",
+          "manifest": "./src/webparts/magApp/MagAppWebPart.manifest.json"
+        }
+      ]
+    }
+  },
+  "externals": {},
+  "localizedResources": {
+    "MagAppWebPartStrings": "lib/webparts/magApp/loc/{locale}.js"
+  }
+}

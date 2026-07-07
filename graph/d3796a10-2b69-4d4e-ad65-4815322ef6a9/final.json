@@ -1,0 +1,1310 @@
+{
+  "nodes": [
+    {
+      "id": "canonical_suspect_benjamin_netanyahu",
+      "label": "בנימין נתניהו",
+      "type": "SUSPECT",
+      "forensic_summary": "בנימין נתניהו כיהן בתפקידים ציבוריים בכירים לאורך שני העשורים האחרונים, כולל ראש ממשלת ישראל, שר החוץ, שר האוצר ושר התקשורת....",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001; Chunk 00002",
+      "metadata": {
+        "is_canonical": true,
+        "merge_reason": "Algorithmic match",
+        "semantic_class": "person",
+        "resolved_aliases_data": [
+          {
+            "original_id": "suspect_benjamin_netanyahu",
+            "original_label": "בנימין נתניהו",
+            "original_forensic_summary": "בנימין נתניהו כיהן בתפקידים ציבוריים בכירים לאורך שני העשורים האחרונים, כולל ראש ממשלת ישראל, שר החוץ, שר האוצר ושר התקשורת. הוא מוגדר כ'עובד הציבור' לפי סעיף 34 לחוק העונשין.",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001"
+          },
+          {
+            "original_id": "suspect_netanyahu",
+            "original_label": "נתניהו",
+            "original_forensic_summary": "נתניהו כיהן כראש ממשלת ישראל וכשר התקשורת בתקופה הרלוונטית, והוגדר כ'עובד הציבור' לפי סעיף 34 לחוק העונשין.",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00002"
+          }
+        ]
+      },
+      "community_id": 1,
+      "file_type": "document"
+    },
+    {
+      "id": "suspect_shaoul_elovitch",
+      "label": "שאול אלוביץ'",
+      "type": "SUSPECT",
+      "forensic_summary": "שאול אלוביץ' היה בעל השליטה בקבוצת יורוקום ובעל תפקידים בכירים בקבוצת בזק, כולל יו\"ר דירקטוריון בזק. קבוצת יורוקום חבה חובות...",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001; Chunk 00002",
+      "metadata": {
+        "is_canonical": true,
+        "merge_reason": "Algorithmic match",
+        "semantic_class": "person",
+        "resolved_aliases_data": [
+          {
+            "original_id": "suspect_shaoul_elovitch",
+            "original_label": "שאול אלוביץ'",
+            "original_forensic_summary": "שאול אלוביץ' היה בעל השליטה בקבוצת יורוקום ובעל תפקידים בכירים בקבוצת בזק, כולל יו\"ר דירקטוריון בזק. קבוצת יורוקום חבה חובות משמעותיים לבנקים.",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001; Chunk 00002"
+          }
+        ]
+      },
+      "community_id": 0,
+      "file_type": "document"
+    },
+    {
+      "id": "suspect_iris_elovitch",
+      "label": "איריס אלוביץ'",
+      "type": "SUSPECT",
+      "forensic_summary": "איריס אלוביץ', רעייתו של שאול אלוביץ', הועסקה ביורוקום ושימשה כיועצת לפעילותו העסקית של בעלה.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001; Chunk 00002",
+      "metadata": {
+        "is_canonical": true,
+        "merge_reason": "Algorithmic match",
+        "semantic_class": "person",
+        "resolved_aliases_data": [
+          {
+            "original_id": "suspect_iris_elovitch",
+            "original_label": "איריס אלוביץ'",
+            "original_forensic_summary": "איריס אלוביץ', רעייתו של שאול אלוביץ', הועסקה ביורוקום ושימשה כיועצת לפעילותו העסקית של בעלה.",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001; Chunk 00002"
+          }
+        ]
+      },
+      "community_id": 0,
+      "file_type": "document"
+    },
+    {
+      "id": "suspect_arnon_mozes",
+      "label": "ארנון מוזס",
+      "type": "SUSPECT",
+      "forensic_summary": "ארנון מוזס הוא בעל השליטה בקבוצת 'ידיעות אחרונות' ועורך אחראי של העיתון. הוא בעל השפעה ניכרת על תכני העיתון ואתר...",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001; Chunk 00002",
+      "metadata": {
+        "is_canonical": true,
+        "merge_reason": "Algorithmic match",
+        "semantic_class": "person",
+        "resolved_aliases_data": [
+          {
+            "original_id": "suspect_arnon_mozes",
+            "original_label": "ארנון מוזס",
+            "original_forensic_summary": "ארנון מוזס הוא בעל השליטה בקבוצת 'ידיעות אחרונות' ועורך אחראי של העיתון. הוא בעל השפעה ניכרת על תכני העיתון ואתר ynet.",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001; Chunk 00002"
+          }
+        ]
+      },
+      "community_id": 2,
+      "file_type": "document"
+    },
+    {
+      "id": "legal_rep_boaz_ben_tzur",
+      "label": "בעז בן-צור",
+      "type": "LEGAL_REP",
+      "forensic_summary": "בעז בן-צור הוא עורך דין המייצג את בנימין נתניהו בתיק זה. משרדו ממוקם ברחוב הארבעה 28, תל אביב.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "semantic_class": "person"
+      },
+      "community_id": 1,
+      "file_type": "document"
+    },
+    {
+      "id": "legal_rep_amit_hadad",
+      "label": "עמית חדד",
+      "type": "LEGAL_REP",
+      "forensic_summary": "עמית חדד הוא עורך דין המייצג את בנימין נתניהו בתיק זה. משרדו ממוקם ברחוב וייצמן 2, תל אביב.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "semantic_class": "person"
+      },
+      "community_id": 1,
+      "file_type": "document"
+    },
+    {
+      "id": "legal_rep_jack_chen",
+      "label": "ז'ק חן",
+      "type": "LEGAL_REP",
+      "forensic_summary": "ז'ק חן הוא עורך דין המייצג את שאול ואיריס אלוביץ בתיק זה. משרדו ממוקם ברחוב וייצמן 2, תל אביב.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "semantic_class": "person"
+      },
+      "community_id": 0,
+      "file_type": "document"
+    },
+    {
+      "id": "legal_rep_michal_rosen_ozar",
+      "label": "מיכל רוזן-עוזר",
+      "type": "LEGAL_REP",
+      "forensic_summary": "מיכל רוזן-עוזר היא עורכת דין המייצגת את שאול ואיריס אלוביץ בתיק זה. משרדו ממוקם ברחוב וייצמן 2, תל אביב.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "semantic_class": "person"
+      },
+      "community_id": 0,
+      "file_type": "document"
+    },
+    {
+      "id": "legal_rep_navit_negev",
+      "label": "נוית נגב",
+      "type": "LEGAL_REP",
+      "forensic_summary": "נוית נגב היא עורכת דין המייצגת את ארנון מוזס בתיק זה. משרדו ממוקם ברחוב וייצמן 2, תל אביב.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "semantic_class": "person"
+      },
+      "community_id": 2,
+      "file_type": "document"
+    },
+    {
+      "id": "legal_rep_iris_niv_sabag",
+      "label": "איריס ניב-סבאג",
+      "type": "LEGAL_REP",
+      "forensic_summary": "איריס ניב-סבאג היא עורכת דין המייצגת את ארנון מוזס בתיק זה. משרדו ממוקם ברחוב וייצמן 2, תל אביב.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "semantic_class": "person"
+      },
+      "community_id": 2,
+      "file_type": "document"
+    },
+    {
+      "id": "offense_public_corruption",
+      "label": "שחיתות ציבורית",
+      "type": "OFFENSE",
+      "forensic_summary": "העבירה המרכזית בתיק זה כוללת חשדות לשחיתות ציבורית, תוך ניצול תפקידים ציבוריים בכירים להשגת טובות הנאה.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "semantic_class": "offense"
+      },
+      "community_id": 0,
+      "file_type": "document"
+    },
+    {
+      "id": "organization_bezeq",
+      "label": "בזק",
+      "type": "ORGANIZATION",
+      "forensic_summary": "בזק היא חברה ציבורית ומונופול בתחום הטלפוניה הקווית ותשתית האינטרנט. מניותיה נסחרו בבורסה בתל אביב.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "semantic_class": "organization"
+      },
+      "community_id": 1,
+      "file_type": "document"
+    },
+    {
+      "id": "organization_walla",
+      "label": "וואלה",
+      "type": "ORGANIZATION",
+      "forensic_summary": "וואלה הייתה חברת בת בבעלות מלאה של בזק, שהפעילה את אתר החדשות וואלה NEWS, אחד מאתרי החדשות הגדולים בישראל.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "semantic_class": "organization"
+      },
+      "community_id": 0,
+      "file_type": "document"
+    },
+    {
+      "id": "accomplice_shlomo_filber",
+      "label": "שלמה פילבר",
+      "type": "Accomplice",
+      "forensic_summary": "פילבר היה מקורבו של נתניהו, שימש כמנהל קמפיין הבחירות של הליכוד ומונה על ידי נתניהו למנכ\"ל משרד התקשורת, למרות היעדר רקע מקצועי בתחום.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "semantic_class": "person"
+      },
+      "community_id": 1,
+      "file_type": "document"
+    },
+    {
+      "id": "accomplice_nir_hefetz",
+      "label": "ניר חפץ",
+      "type": "Accomplice",
+      "forensic_summary": "חפץ שימש כיועץ תקשורת של נתניהו ומשפחתו, ועבד בעבר בקבוצת 'ידיעות אחרונות' ובתפקידי דוברות בלשכת נתניהו.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "semantic_class": "person"
+      },
+      "community_id": 1,
+      "file_type": "document"
+    },
+    {
+      "id": "accomplice_ilan_yeshua",
+      "label": "אילן ישועה",
+      "type": "Accomplice",
+      "forensic_summary": "ישועה שימש כמנכ\"ל וואלה בתקופה הרלוונטית לאישום הראשון.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "semantic_class": "person"
+      },
+      "community_id": 3,
+      "file_type": "document"
+    },
+    {
+      "id": "accomplice_zeev_rubinstein",
+      "label": "זאב רובינשטיין",
+      "type": "Accomplice",
+      "forensic_summary": "רובינשטיין היה חבר קרוב של בני הזוג אלוביץ' ומקורב לנתניהו ולרעייתו. בעבר כיהן בתפקידים בקבוצת יורוקום.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "semantic_class": "person"
+      },
+      "community_id": 4,
+      "file_type": "document"
+    },
+    {
+      "id": "accomplice_ari_haro",
+      "label": "ארי הרו",
+      "type": "Accomplice",
+      "forensic_summary": "הרו שימש כמנהל לשכת ראש הממשלה בשנים 2008-2009 וכראש סגל לשכת ראש הממשלה בשנים 2014-2015.",
+      "event_date": null,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "semantic_class": "person"
+      },
+      "community_id": 5,
+      "file_type": "document"
+    }
+  ],
+  "edges": [
+    {
+      "source": "canonical_suspect_benjamin_netanyahu",
+      "target": "offense_public_corruption",
+      "relation": "INDICTED_FOR",
+      "description": "בנימין נתניהו מואשם בשחיתות ציבורית במסגרת תפקידיו הציבוריים.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "INDICTED_FOR",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "בנימין נתניהו מואשם בשחיתות ציבורית במסגרת תפקידיו הציבוריים."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "suspect_shaoul_elovitch",
+      "target": "offense_public_corruption",
+      "relation": "INDICTED_FOR",
+      "description": "שאול אלוביץ מואשם במעורבות בשחיתות ציבורית.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "INDICTED_FOR",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "שאול אלוביץ מואשם במעורבות בשחיתות ציבורית."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "suspect_iris_elovitch",
+      "target": "offense_public_corruption",
+      "relation": "INDICTED_FOR",
+      "description": "איריס אלוביץ מואשמת במעורבות בשחיתות ציבורית.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "INDICTED_FOR",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "איריס אלוביץ מואשמת במעורבות בשחיתות ציבורית."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "suspect_arnon_mozes",
+      "target": "offense_public_corruption",
+      "relation": "INDICTED_FOR",
+      "description": "ארנון מוזס מואשם במעורבות בשחיתות ציבורית.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "INDICTED_FOR",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "ארנון מוזס מואשם במעורבות בשחיתות ציבורית."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_boaz_ben_tzur",
+      "target": "canonical_suspect_benjamin_netanyahu",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "בעז בן-צור מייצג את בנימין נתניהו בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "בעז בן-צור מייצג את בנימין נתניהו בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_amit_hadad",
+      "target": "canonical_suspect_benjamin_netanyahu",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "עמית חדד מייצג את בנימין נתניהו בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "עמית חדד מייצג את בנימין נתניהו בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_jack_chen",
+      "target": "suspect_shaoul_elovitch",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "ז'ק חן מייצג את שאול אלוביץ בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "ז'ק חן מייצג את שאול אלוביץ בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_michal_rosen_ozar",
+      "target": "suspect_shaoul_elovitch",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "מיכל רוזן-עוזר מייצגת את שאול אלוביץ בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "מיכל רוזן-עוזר מייצגת את שאול אלוביץ בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_jack_chen",
+      "target": "suspect_iris_elovitch",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "ז'ק חן מייצג את איריס אלוביץ בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "ז'ק חן מייצג את איריס אלוביץ בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_michal_rosen_ozar",
+      "target": "suspect_iris_elovitch",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "מיכל רוזן-עוזר מייצגת את איריס אלוביץ בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "מיכל רוזן-עוזר מייצגת את איריס אלוביץ בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_navit_negev",
+      "target": "suspect_arnon_mozes",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "נוית נגב מייצגת את ארנון מוזס בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "נוית נגב מייצגת את ארנון מוזס בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_iris_niv_sabag",
+      "target": "suspect_arnon_mozes",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "איריס ניב-סבאג מייצגת את ארנון מוזס בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "איריס ניב-סבאג מייצגת את ארנון מוזס בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "canonical_suspect_benjamin_netanyahu",
+      "target": "organization_bezeq",
+      "relation": "INVOLVED_IN",
+      "description": "נתניהו היה מעורב בהחלטות הנוגעות לבזק במסגרת תפקידו כשר התקשורת.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 0.9,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "INVOLVED_IN",
+            "quality": 0.9,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00002",
+            "description": "נתניהו היה מעורב בהחלטות הנוגעות לבזק במסגרת תפקידו כשר התקשורת."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "suspect_shaoul_elovitch",
+      "target": "organization_bezeq",
+      "relation": "OWNER_OF",
+      "description": "שאול אלוביץ' היה בעל השליטה בקבוצת בזק באמצעות קבוצת יורוקום.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "OWNER_OF",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00002",
+            "description": "שאול אלוביץ' היה בעל השליטה בקבוצת בזק באמצעות קבוצת יורוקום."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "suspect_shaoul_elovitch",
+      "target": "organization_walla",
+      "relation": "OWNER_OF",
+      "description": "אלוביץ' שלט גם בחברת וואלה, שהייתה בבעלות מלאה של בזק.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "OWNER_OF",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00002",
+            "description": "אלוביץ' שלט גם בחברת וואלה, שהייתה בבעלות מלאה של בזק."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "canonical_suspect_benjamin_netanyahu",
+      "target": "accomplice_shlomo_filber",
+      "relation": "APPOINTED",
+      "description": "נתניהו מינה את פילבר למנכ\"ל משרד התקשורת.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 0.95,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "APPOINTED",
+            "quality": 0.95,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00002",
+            "description": "נתניהו מינה את פילבר למנכ\"ל משרד התקשורת."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "canonical_suspect_benjamin_netanyahu",
+      "target": "accomplice_nir_hefetz",
+      "relation": "APPOINTED",
+      "description": "נתניהו מינה את חפץ כיועץ תקשורת אישי.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 0.9,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "APPOINTED",
+            "quality": 0.9,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00002",
+            "description": "נתניהו מינה את חפץ כיועץ תקשורת אישי."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    }
+  ],
+  "metadata": {
+    "doc_id": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+    "entity_resolution_report": {
+      "merge_group_count": 1,
+      "merged_alias_count": 2,
+      "merge_groups": [
+        {
+          "canonical_id": "canonical_suspect_benjamin_netanyahu",
+          "canonical_label": "נתניהו",
+          "alias_ids": [
+            "suspect_netanyahu",
+            "suspect_benjamin_netanyahu"
+          ],
+          "alias_labels": [
+            "נתניהו",
+            "בנימין נתניהו"
+          ],
+          "reason": "Algorithmic match"
+        }
+      ],
+      "node_count_before": 22,
+      "node_count_after": 18,
+      "edge_count_before": 18,
+      "edge_count_after": 17,
+      "mapping": {
+        "suspect_benjamin_netanyahu": "canonical_suspect_benjamin_netanyahu",
+        "suspect_shaoul_elovitch": "suspect_shaoul_elovitch",
+        "suspect_iris_elovitch": "suspect_iris_elovitch",
+        "suspect_arnon_mozes": "suspect_arnon_mozes",
+        "legal_rep_boaz_ben_tzur": "legal_rep_boaz_ben_tzur",
+        "legal_rep_amit_hadad": "legal_rep_amit_hadad",
+        "legal_rep_jack_chen": "legal_rep_jack_chen",
+        "legal_rep_michal_rosen_ozar": "legal_rep_michal_rosen_ozar",
+        "legal_rep_navit_negev": "legal_rep_navit_negev",
+        "legal_rep_iris_niv_sabag": "legal_rep_iris_niv_sabag",
+        "offense_public_corruption": "offense_public_corruption",
+        "suspect_netanyahu": "canonical_suspect_benjamin_netanyahu",
+        "organization_bezeq": "organization_bezeq",
+        "organization_walla": "organization_walla",
+        "accomplice_shlomo_filber": "accomplice_shlomo_filber",
+        "accomplice_nir_hefetz": "accomplice_nir_hefetz",
+        "accomplice_ilan_yeshua": "accomplice_ilan_yeshua",
+        "accomplice_zeev_rubinstein": "accomplice_zeev_rubinstein",
+        "accomplice_ari_haro": "accomplice_ari_haro"
+      }
+    }
+  },
+  "graph": {
+    "communities": {
+      "0": [
+        "suspect_shaoul_elovitch",
+        "legal_rep_jack_chen",
+        "suspect_iris_elovitch",
+        "offense_public_corruption",
+        "organization_walla",
+        "legal_rep_michal_rosen_ozar"
+      ],
+      "1": [
+        "canonical_suspect_benjamin_netanyahu",
+        "accomplice_shlomo_filber",
+        "organization_bezeq",
+        "accomplice_nir_hefetz",
+        "legal_rep_amit_hadad",
+        "legal_rep_boaz_ben_tzur"
+      ],
+      "2": [
+        "legal_rep_navit_negev",
+        "suspect_arnon_mozes",
+        "legal_rep_iris_niv_sabag"
+      ],
+      "3": [
+        "accomplice_ilan_yeshua"
+      ],
+      "4": [
+        "accomplice_zeev_rubinstein"
+      ],
+      "5": [
+        "accomplice_ari_haro"
+      ]
+    }
+  },
+  "links": [
+    {
+      "source": "canonical_suspect_benjamin_netanyahu",
+      "target": "offense_public_corruption",
+      "relation": "INDICTED_FOR",
+      "description": "בנימין נתניהו מואשם בשחיתות ציבורית במסגרת תפקידיו הציבוריים.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "INDICTED_FOR",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "בנימין נתניהו מואשם בשחיתות ציבורית במסגרת תפקידיו הציבוריים."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "suspect_shaoul_elovitch",
+      "target": "offense_public_corruption",
+      "relation": "INDICTED_FOR",
+      "description": "שאול אלוביץ מואשם במעורבות בשחיתות ציבורית.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "INDICTED_FOR",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "שאול אלוביץ מואשם במעורבות בשחיתות ציבורית."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "suspect_iris_elovitch",
+      "target": "offense_public_corruption",
+      "relation": "INDICTED_FOR",
+      "description": "איריס אלוביץ מואשמת במעורבות בשחיתות ציבורית.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "INDICTED_FOR",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "איריס אלוביץ מואשמת במעורבות בשחיתות ציבורית."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "suspect_arnon_mozes",
+      "target": "offense_public_corruption",
+      "relation": "INDICTED_FOR",
+      "description": "ארנון מוזס מואשם במעורבות בשחיתות ציבורית.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "INDICTED_FOR",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "ארנון מוזס מואשם במעורבות בשחיתות ציבורית."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_boaz_ben_tzur",
+      "target": "canonical_suspect_benjamin_netanyahu",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "בעז בן-צור מייצג את בנימין נתניהו בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "בעז בן-צור מייצג את בנימין נתניהו בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_amit_hadad",
+      "target": "canonical_suspect_benjamin_netanyahu",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "עמית חדד מייצג את בנימין נתניהו בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "עמית חדד מייצג את בנימין נתניהו בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_jack_chen",
+      "target": "suspect_shaoul_elovitch",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "ז'ק חן מייצג את שאול אלוביץ בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "ז'ק חן מייצג את שאול אלוביץ בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_michal_rosen_ozar",
+      "target": "suspect_shaoul_elovitch",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "מיכל רוזן-עוזר מייצגת את שאול אלוביץ בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "מיכל רוזן-עוזר מייצגת את שאול אלוביץ בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_jack_chen",
+      "target": "suspect_iris_elovitch",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "ז'ק חן מייצג את איריס אלוביץ בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "ז'ק חן מייצג את איריס אלוביץ בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_michal_rosen_ozar",
+      "target": "suspect_iris_elovitch",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "מיכל רוזן-עוזר מייצגת את איריס אלוביץ בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "מיכל רוזן-עוזר מייצגת את איריס אלוביץ בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_navit_negev",
+      "target": "suspect_arnon_mozes",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "נוית נגב מייצגת את ארנון מוזס בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "נוית נגב מייצגת את ארנון מוזס בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "legal_rep_iris_niv_sabag",
+      "target": "suspect_arnon_mozes",
+      "relation": "LEGAL_REPRESENTATION",
+      "description": "איריס ניב-סבאג מייצגת את ארנון מוזס בתיק זה.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00001",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "LEGAL_REPRESENTATION",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00001",
+            "description": "איריס ניב-סבאג מייצגת את ארנון מוזס בתיק זה."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "canonical_suspect_benjamin_netanyahu",
+      "target": "organization_bezeq",
+      "relation": "INVOLVED_IN",
+      "description": "נתניהו היה מעורב בהחלטות הנוגעות לבזק במסגרת תפקידו כשר התקשורת.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 0.9,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "INVOLVED_IN",
+            "quality": 0.9,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00002",
+            "description": "נתניהו היה מעורב בהחלטות הנוגעות לבזק במסגרת תפקידו כשר התקשורת."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "suspect_shaoul_elovitch",
+      "target": "organization_bezeq",
+      "relation": "OWNER_OF",
+      "description": "שאול אלוביץ' היה בעל השליטה בקבוצת בזק באמצעות קבוצת יורוקום.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "OWNER_OF",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00002",
+            "description": "שאול אלוביץ' היה בעל השליטה בקבוצת בזק באמצעות קבוצת יורוקום."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "suspect_shaoul_elovitch",
+      "target": "organization_walla",
+      "relation": "OWNER_OF",
+      "description": "אלוביץ' שלט גם בחברת וואלה, שהייתה בבעלות מלאה של בזק.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "OWNER_OF",
+            "quality": 1.0,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00002",
+            "description": "אלוביץ' שלט גם בחברת וואלה, שהייתה בבעלות מלאה של בזק."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "canonical_suspect_benjamin_netanyahu",
+      "target": "accomplice_shlomo_filber",
+      "relation": "APPOINTED",
+      "description": "נתניהו מינה את פילבר למנכ\"ל משרד התקשורת.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 0.95,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "APPOINTED",
+            "quality": 0.95,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00002",
+            "description": "נתניהו מינה את פילבר למנכ\"ל משרד התקשורת."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    },
+    {
+      "source": "canonical_suspect_benjamin_netanyahu",
+      "target": "accomplice_nir_hefetz",
+      "relation": "APPOINTED",
+      "description": "נתניהו מינה את חפץ כיועץ תקשורת אישי.",
+      "confidence": "EXTRACTED",
+      "confidence_score": 0.9,
+      "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+      "source_location": "Chunk 00002",
+      "metadata": {
+        "all_relations_history": [
+          {
+            "relation": "APPOINTED",
+            "quality": 0.9,
+            "timestamp": "1900-01-01",
+            "source_file": "d3796a10-2b69-4d4e-ad65-4815322ef6a9",
+            "source_location": "Chunk 00002",
+            "description": "נתניהו מינה את חפץ כיועץ תקשורת אישי."
+          }
+        ],
+        "source_files": [
+          "d3796a10-2b69-4d4e-ad65-4815322ef6a9"
+        ]
+      },
+      "timestamp": "1900-01-01",
+      "weight": 1.0
+    }
+  ]
+}
