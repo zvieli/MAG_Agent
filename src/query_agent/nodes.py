@@ -181,7 +181,7 @@ async def coordinator_node(state: InvestigationState) -> Dict[str, Any]:
         "messages": messages
     }
 
-async def route_coordinator(state: InvestigationState) -> str:
+async def route_coordinator(state: InvestigationState) -> Any:
     # Determine branch to route to based on current task
     if not state.current_task:
         return "finalizer"
@@ -193,13 +193,13 @@ async def route_coordinator(state: InvestigationState) -> str:
         decision = await call_llm(system_prompt, user_prompt)
         decision = decision.lower().strip()
         if "parallel" in decision:
-            return "parallel"
+            return ["doc_branch", "graph_branch"]
         elif "graph" in decision:
-            return "graph_only"
+            return "graph_branch"
         else:
-            return "doc_only"
+            return "doc_branch"
     except Exception:
-        return "parallel"
+        return ["doc_branch", "graph_branch"]
 
 
 # Node 4: Doc Branch Node
@@ -433,9 +433,8 @@ def get_investigative_graph():
     builder.add_edge("process_hitl", "planner")
     
     builder.add_conditional_edges("coordinator", route_coordinator, {
-        "doc_only": "doc_branch",
-        "graph_only": "graph_branch",
-        "parallel": ["doc_branch", "graph_branch"],
+        "doc_branch": "doc_branch",
+        "graph_branch": "graph_branch",
         "finalizer": "finalizer"
     })
     

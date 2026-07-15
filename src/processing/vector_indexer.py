@@ -53,8 +53,20 @@ async def generate_embeddings(
         response = await client.embeddings.create(input=texts, model=model)
         return [item.embedding for item in response.data]
     except Exception as e:
-        logging.error(fix_text(str(f"Error generating embeddings: {e}")))
-        return []
+        err_msg = str(e)
+        logging.error(fix_text(str(f"Error generating embeddings: {err_msg}")))
+        if "403" in err_msg or "firewall" in err_msg.lower() or "forbidden" in err_msg.lower():
+            logging.warning(
+                "⚠️ Warning: Azure OpenAI embeddings endpoint returned 403 (Firewall/VNet rule blocked). "
+                "Falling back to a dummy zero-vector of length 1536 for hybrid search compatibility. "
+                "Ensure your IP is whitelisted in Azure OpenAI Service if you need high-accuracy vector search."
+            )
+        else:
+            logging.warning(
+                f"⚠️ Warning: Embedding generation failed ({err_msg}). "
+                "Falling back to a dummy zero-vector of length 1536 to keep the search system active."
+            )
+        return [[0.0] * 1536 for _ in texts]
 
 
 logger = logging.getLogger(__name__)

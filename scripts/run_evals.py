@@ -47,7 +47,22 @@ async def run_evals(dataset_path: str):
     try:
         summary = await evaluator.evaluate(dataset_path)
     except Exception as e:
-        print(f"❌ Error executing evaluations: {e}")
+        err_msg = str(e)
+        print(f"❌ Error executing evaluations: {err_msg}")
+        if "403" in err_msg or "firewall" in err_msg.lower() or "forbidden" in err_msg.lower():
+            print("\n" + "!" * 15 + " AZURE FIREWALL BLOCK DETECTED " + "!" * 15)
+            print("Access was denied due to Azure OpenAI Virtual Network/Firewall rules.")
+            try:
+                import urllib.request
+                public_ip = urllib.request.urlopen("https://api.ipify.org", timeout=3).read().decode("utf-8")
+                print(f"\n👉 Your current public IP is: {public_ip}")
+            except Exception:
+                public_ip = "Unknown"
+                print("\n👉 Could not retrieve public IP.")
+            print("\n👉 Troubleshooting Actions:")
+            print("   1. Verify if you need to connect to the organization VPN.")
+            print("   2. Whitelist your public IP in the Azure Portal under your Azure OpenAI resource -> 'Networking' tab.")
+            print("=" * 60)
         return
 
     if not summary or summary.get("status") == "error":
