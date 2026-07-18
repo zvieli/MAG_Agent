@@ -1,8 +1,9 @@
 import logging
 import json
 import asyncio
-from typing import Dict, Any, List, Optional
-from langgraph.graph import StateGraph, END
+from typing import Dict, Any, List, Optional, Literal
+from langgraph.graph import StateGraph, END, START
+from langgraph.types import Command
 
 from src.utils.config import settings
 from src.extraction.extraction_engine import _build_azure_client
@@ -66,10 +67,8 @@ async def rerank_chunks_llm(query: str, chunks: List[Dict[str, Any]], top_n: int
 
 
 # Node 1: Hydrate Node (Validation)
-async def hydrate_node(state: InvestigationState) -> Dict[str, Any]:
+async def hydrate_node(state: InvestigationState) -> Command[Literal["process_hitl", "coordinator"]]:
     logger.info("[hydrate_node] Validating incoming state payload.")
-    # Schema validation is guaranteed by Pydantic deserialization
-    # Session ownership validation:
     if not state.doc_id or not state.doc_id.strip():
         raise ValueError("doc_id partition context is required to ensure partition-level data isolation.")
     
@@ -78,12 +77,12 @@ async def hydrate_node(state: InvestigationState) -> Dict[str, Any]:
         logger.error(f"[hydrate_node] Unauthorized access attempt to doc_id: {state.doc_id}")
         raise PermissionError(f"Unauthorized access to document partition: {state.doc_id}")
 
-    return {}
-
-def entry_router(state: InvestigationState) -> str:
+    goto = "coordinator"
     if state.pending_fact_approval is not None and state.user_feedback is not None:
-        return "process_hitl"
-    return "coordinator"
+        goto = "process_hitl"
+
+    return Command(goto=goto)
+
 
 
 # Node 2: Process HITL Node
@@ -131,7 +130,7 @@ async def process_hitl_node(state: InvestigationState) -> Dict[str, Any]:
 
 
 # Node 3: Coordinator Node
-async def coordinator_node(state: InvestigationState) -> Dict[str, Any]:
+async def coordinator_node(state: InvestigationState) -> Command[Literal["doc_branch", "graph_branch", "finalizer"]]:
     logger.info("[coordinator_node] Directing query routing and task planning.")
     
     plan = list(state.investigation_plan)
@@ -175,31 +174,41 @@ async def coordinator_node(state: InvestigationState) -> Dict[str, Any]:
             "content": f"Starting investigative task: '{current_task}'"
         })
 
-    return {
-        "investigation_plan": plan,
-        "current_task": current_task,
-        "messages": messages
-    }
-
-async def route_coordinator(state: InvestigationState) -> Any:
     # Determine branch to route to based on current task
-    if not state.current_task:
-        return "finalizer"
+    if not current_task:
+        return Command(
+            update={
+                "investigation_plan": plan,
+                "current_task": current_task,
+                "messages": messages
+            },
+            goto="finalizer"
+        )
 
     from src.utils.config_manager import config_manager
     system_prompt = await config_manager.get_config("route_coordinator_system.md")
-    user_prompt = f"Current Task: {state.current_task}"
+    user_prompt = f"Current Task: {current_task}"
     try:
         decision = await call_llm(system_prompt, user_prompt)
         decision = decision.lower().strip()
         if "parallel" in decision:
-            return ["doc_branch", "graph_branch"]
+            goto = ["doc_branch", "graph_branch"]
         elif "graph" in decision:
-            return "graph_branch"
+            goto = "graph_branch"
         else:
-            return "doc_branch"
+            goto = "doc_branch"
     except Exception:
-        return ["doc_branch", "graph_branch"]
+        goto = ["doc_branch", "graph_branch"]
+
+    return Command(
+        update={
+            "investigation_plan": plan,
+            "current_task": current_task,
+            "messages": messages
+        },
+        goto=goto
+    )
+
 
 
 # Node 4: Doc Branch Node
@@ -302,16 +311,19 @@ async def synthesis_node(state: InvestigationState) -> Dict[str, Any]:
 
 
 # Node 7: Extraction Node
-async def extraction_node(state: InvestigationState) -> Dict[str, Any]:
+async def extraction_node(state: InvestigationState) -> Command[Literal["halt_for_hitl", "planner"]]:
     logger.info("[extraction_node] Extracting admissible facts from synthesized evidence.")
     
     synthesis = state.transient_synthesis_results or ""
     if not synthesis:
         # Flow direct to planner if no synthesis results
-        return {
-            "current_task": None,
-            "transient_synthesis_results": None
-        }
+        return Command(
+            update={
+                "current_task": None,
+                "transient_synthesis_results": None
+            },
+            goto="planner"
+        )
 
     # 1. Propose fact extraction
     from src.utils.config_manager import config_manager
@@ -349,16 +361,17 @@ async def extraction_node(state: InvestigationState) -> Dict[str, Any]:
     
     if pending:
         updates["pending_fact_approval"] = pending
+        goto = "halt_for_hitl"
     else:
         # Mark current task complete since no new fact was found
         updates["current_task"] = None
+        goto = "planner"
         
-    return updates
+    return Command(
+        update=updates,
+        goto=goto
+    )
 
-def route_extraction(state: InvestigationState) -> str:
-    if state.pending_fact_approval is not None:
-        return "halt_for_hitl"
-    return "planner"
 
 
 # Node 8: Halt for HITL Node
@@ -368,14 +381,9 @@ async def halt_for_hitl_node(state: InvestigationState) -> Dict[str, Any]:
 
 
 # Node 9: Planner Node
-async def planner_node(state: InvestigationState) -> Dict[str, Any]:
-    # Decides if more sub-tasks are left or if we route to finalizer
-    return {}
-
-def route_planner(state: InvestigationState) -> str:
-    if state.investigation_plan:
-        return "coordinator"
-    return "finalizer"
+async def planner_node(state: InvestigationState) -> Command[Literal["coordinator", "finalizer"]]:
+    goto = "coordinator" if state.investigation_plan else "finalizer"
+    return Command(goto=goto)
 
 
 # Node 10: Finalizer Node (Sanitizer)
@@ -424,19 +432,9 @@ def get_investigative_graph():
     builder.add_node("finalizer", finalizer_node)
     
     # Edges
-    builder.set_entry_point("hydrate")
-    builder.add_conditional_edges("hydrate", entry_router, {
-        "process_hitl": "process_hitl",
-        "coordinator": "coordinator"
-    })
+    builder.add_edge(START, "hydrate")
     
     builder.add_edge("process_hitl", "planner")
-    
-    builder.add_conditional_edges("coordinator", route_coordinator, {
-        "doc_branch": "doc_branch",
-        "graph_branch": "graph_branch",
-        "finalizer": "finalizer"
-    })
     
     # Sync parallel execution results
     builder.add_edge("doc_branch", "synthesis")
@@ -444,17 +442,7 @@ def get_investigative_graph():
     
     builder.add_edge("synthesis", "extraction")
     
-    builder.add_conditional_edges("extraction", route_extraction, {
-        "halt_for_hitl": "halt_for_hitl",
-        "planner": "planner"
-    })
-    
     builder.add_edge("halt_for_hitl", END)
-    
-    builder.add_conditional_edges("planner", route_planner, {
-        "coordinator": "coordinator",
-        "finalizer": "finalizer"
-    })
     
     builder.add_edge("finalizer", END)
     

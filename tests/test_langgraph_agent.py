@@ -1,13 +1,13 @@
 import pytest
 from src.query_agent.state import InvestigationState, VerifiedFact, PendingFactApproval
+from langgraph.types import Command
 from src.query_agent.nodes import (
     hydrate_node,
     process_hitl_node,
-    entry_router,
-    route_coordinator,
-    route_extraction,
+    coordinator_node,
     synthesis_node,
     extraction_node,
+    planner_node,
     finalizer_node
 )
 
@@ -44,7 +44,8 @@ async def test_hydrate_node_security_checks(monkeypatch):
     # Test valid doc_id
     state = InvestigationState(doc_id="case_123")
     res = await hydrate_node(state)
-    assert res == {}
+    assert isinstance(res, Command)
+    assert res.goto == "coordinator"
 
     # Test missing doc_id
     with pytest.raises(ValueError, match="doc_id partition context is required"):
@@ -59,7 +60,9 @@ async def test_hydrate_node_security_checks(monkeypatch):
     
     # Allowed doc_id
     state_allowed = InvestigationState(doc_id="case_123")
-    await hydrate_node(state_allowed)
+    res_allowed = await hydrate_node(state_allowed)
+    assert isinstance(res_allowed, Command)
+    assert res_allowed.goto == "coordinator"
     
     # Unauthorized doc_id
     state_unauthorized = InvestigationState(doc_id="case_456")
@@ -67,10 +70,13 @@ async def test_hydrate_node_security_checks(monkeypatch):
         await hydrate_node(state_unauthorized)
 
 
-def test_entry_router():
+@pytest.mark.asyncio
+async def test_hydrate_node_routing():
     # Routed to coordinator if no HITL pending
     state_new = InvestigationState(doc_id="case_123")
-    assert entry_router(state_new) == "coordinator"
+    res = await hydrate_node(state_new)
+    assert isinstance(res, Command)
+    assert res.goto == "coordinator"
 
     # Routed to process_hitl if fact pending and user feedback is present
     state_hitl = InvestigationState(
@@ -80,7 +86,24 @@ def test_entry_router():
         ),
         user_feedback="approved"
     )
-    assert entry_router(state_hitl) == "process_hitl"
+    res_hitl = await hydrate_node(state_hitl)
+    assert isinstance(res_hitl, Command)
+    assert res_hitl.goto == "process_hitl"
+
+
+@pytest.mark.asyncio
+async def test_planner_node():
+    # Route to coordinator if there is an investigation plan left
+    state_plan = InvestigationState(doc_id="case_123", investigation_plan=["task_1"])
+    res_plan = await planner_node(state_plan)
+    assert isinstance(res_plan, Command)
+    assert res_plan.goto == "coordinator"
+
+    # Route to finalizer if plan is empty
+    state_empty = InvestigationState(doc_id="case_123", investigation_plan=[])
+    res_empty = await planner_node(state_empty)
+    assert isinstance(res_empty, Command)
+    assert res_empty.goto == "finalizer"
 
 
 @pytest.mark.asyncio
@@ -165,3 +188,95 @@ async def test_state_bloat_pruning_and_sanitization():
     assert res_final["transient_synthesis_results"] is None
     assert res_final["pending_fact_approval"] is None
     assert res_final["user_feedback"] is None
+
+@pytest.mark.asyncio
+async def test_coordinator_node_command(monkeypatch):
+    from src.query_agent import nodes
+    from src.utils.config_manager import config_manager
+    
+    async def mock_call(sys, user, **kw):
+        if "coordinator_system" in sys or "Initial Question" in user:
+            return '["task_1", "task_2"]'
+        return "parallel"
+    
+    async def mock_config(name):
+        return "system_prompt_mock"
+        
+    monkeypatch.setattr(nodes, "call_llm", mock_call)
+    monkeypatch.setattr(config_manager, "get_config", mock_config)
+    
+    # 1. Test empty plan and empty current_task (should initialize plan and pop first task, then route)
+    state = InvestigationState(
+        doc_id="case_123",
+        messages=[{"role": "user", "content": "test query"}]
+    )
+    res = await coordinator_node(state)
+    assert isinstance(res, Command)
+    assert res.goto == ["doc_branch", "graph_branch"]
+    assert res.update["current_task"] == "task_1"
+    assert res.update["investigation_plan"] == ["task_2"]
+    
+    # 2. Test when plan is empty and current_task is empty (routes to finalizer)
+    async def mock_call_empty(sys, user, **kw):
+        return "[]"
+    monkeypatch.setattr(nodes, "call_llm", mock_call_empty)
+    
+    state_final = InvestigationState(
+        doc_id="case_123",
+        messages=[{"role": "user", "content": "test query"}]
+    )
+    res_final = await coordinator_node(state_final)
+    assert isinstance(res_final, Command)
+    assert res_final.goto == "finalizer"
+    assert res_final.update["current_task"] is None
+
+
+@pytest.mark.asyncio
+async def test_extraction_node_command(monkeypatch):
+    from src.query_agent import nodes
+    from src.utils.config_manager import config_manager
+    
+    # Scenario 1: No synthesis results
+    state_no_synth = InvestigationState(doc_id="case_123")
+    res = await extraction_node(state_no_synth)
+    assert isinstance(res, Command)
+    assert res.goto == "planner"
+    assert res.update["current_task"] is None
+    assert res.update["transient_synthesis_results"] is None
+    
+    # Scenario 2: Fact found
+    async def mock_call_fact(sys, user, **kw):
+        return '{"fact_found": true, "fact": "John Doe is a suspect", "source_id": "doc_1"}'
+    async def mock_config(name):
+        return "system_prompt_mock"
+        
+    monkeypatch.setattr(nodes, "call_llm", mock_call_fact)
+    monkeypatch.setattr(config_manager, "get_config", mock_config)
+    
+    state_fact = InvestigationState(
+        doc_id="case_123",
+        current_task="investigate suspects",
+        transient_synthesis_results="John Doe is a suspect based on docs."
+    )
+    res_fact = await extraction_node(state_fact)
+    assert isinstance(res_fact, Command)
+    assert res_fact.goto == "halt_for_hitl"
+    assert res_fact.update["pending_fact_approval"] is not None
+    assert res_fact.update["pending_fact_approval"].fact == "John Doe is a suspect"
+    assert res_fact.update["transient_synthesis_results"] is None
+    
+    # Scenario 3: No fact found
+    async def mock_call_no_fact(sys, user, **kw):
+        return '{"fact_found": false}'
+    monkeypatch.setattr(nodes, "call_llm", mock_call_no_fact)
+    
+    state_no_fact = InvestigationState(
+        doc_id="case_123",
+        current_task="investigate suspects",
+        transient_synthesis_results="No suspects found."
+    )
+    res_no_fact = await extraction_node(state_no_fact)
+    assert isinstance(res_no_fact, Command)
+    assert res_no_fact.goto == "planner"
+    assert res_no_fact.update["current_task"] is None
+    assert res_no_fact.update["transient_synthesis_results"] is None
