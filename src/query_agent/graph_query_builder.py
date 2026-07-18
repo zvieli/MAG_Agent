@@ -1,7 +1,7 @@
 import logging
 import re
 import json
-from typing import Any, Dict, List, Union
+from typing import Any, Dict, List
 from src.extraction.extraction_engine import _build_azure_client
 from src.utils.config import settings
 

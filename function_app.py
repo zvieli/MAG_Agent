@@ -21,7 +21,7 @@ from src.storage.factory import get_cosmos_manager
 from src.utils.config import settings
 from src.operations.dependency_checker import DependencyChecker
 from src.query_agent.query_agent import QueryAgent
-from src.models.models import SCHEMA_CONFIG  # Forces loading schema into memory cache during worker init
+from src.models.models import SCHEMA_CONFIG  # noqa: F401 # Forces loading schema into memory cache during worker init
 
 # Initialize the Durable Functions App (Python V2 Model)
 app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -375,7 +375,6 @@ def ping(req: func.HttpRequest) -> func.HttpResponse:
 @app.route(route="debug_logs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def debug_logs(req: func.HttpRequest) -> func.HttpResponse:
     import glob
-    import time
     
     logs = []
     log_dirs = ["/home/LogFiles", "/home/LogFiles/Application/Functions/Host", "/home/LogFiles/Application/Functions/Function", "/tmp"]

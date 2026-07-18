@@ -6,8 +6,11 @@ ENV AzureWebJobsScriptRoot=/home/site/wwwroot/src/operations \
 
 WORKDIR /home/site/wwwroot
 
+# Copy the uv binary from the official Docker image
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
+
 COPY requirements.txt /
-RUN pip install --no-cache-dir -r /requirements.txt && \
+RUN uv pip install --system --no-cache -r /requirements.txt && \
     mkdir -p /var/tmp/tiktoken_cache && \
     python3 -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 

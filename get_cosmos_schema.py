@@ -8,7 +8,6 @@ if not sys.prefix.endswith(".venv") and os.path.exists(venv_python) and sys.exec
 
 import asyncio
 from src.graph.cosmos_manager import CosmosGremlinManager
-from src.utils.config import settings
 
 async def inspect_schema():
     cosmos_mgr = CosmosGremlinManager()

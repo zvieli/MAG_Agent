@@ -3,20 +3,19 @@ from src.utils.bidi_utils import fix_text
 import asyncio
 import json
 import logging
-import sys
-from typing import Any, Optional, Dict, List
+from typing import Any, Optional, Dict
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from src.utils.config import settings
 from src.query_agent.ontology_engine import OntologyEngine
 from src.query_agent.graph_query_builder import GraphQueryBuilder
-from src.models.models import SCHEMA_CONFIG, RELATION_LABELS, normalize_relation_label
+from src.models.models import SCHEMA_CONFIG
 from src.interfaces.protocols import KnowledgeProvider
 from src.processing.cloud_knowledge_provider import CloudKnowledgeProvider
 from src.storage.search_manager import SearchManager
 from src.graph.cosmos_manager import CosmosGremlinManager
 
-from src.query_agent.state import InvestigationState, VerifiedFact, PendingFactApproval
+from src.query_agent.state import InvestigationState
 from src.query_agent.nodes import get_investigative_graph
 
 logger = logging.getLogger(__name__)

@@ -1,7 +1,6 @@
 import logging
 import json
-import asyncio
-from typing import Dict, Any, List, Optional, Literal
+from typing import Dict, Any, List, Literal
 from langgraph.graph import StateGraph, END, START
 from langgraph.types import Command
 
@@ -19,7 +18,6 @@ from src.query_agent.state import (
     InvestigationOutputState,
     VerifiedFact,
     PendingFactApproval,
-    UserMessage,
     AssistantMessage,
     ChatMessage
 )

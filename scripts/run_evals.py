@@ -30,7 +30,7 @@ class LocalOrStoreReader:
 
 async def run_evals(dataset_path: str):
     print("=" * 60)
-    print(f"🚀 STARTING RAG EVALUATION SUITE")
+    print("🚀 STARTING RAG EVALUATION SUITE")
     print(f"Dataset Path: {dataset_path}")
     print("=" * 60)
 

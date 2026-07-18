@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import re
 from src.storage.factory import get_artifact_store, get_search_manager
 from src.processing.vector_indexer import generate_embeddings
 from src.utils.config import settings

@@ -256,7 +256,6 @@ def _community_context_edges(
 
 async def summarize_communities(G, communities, community_labels):
     from src.graph.local_graphify import god_nodes
-    from src.extraction.extraction_engine import resolve_host_ip, temporary_dns_override
 
     summaries: dict[str, str] = {}
     seen_titles = Counter()
