@@ -12,9 +12,25 @@ from src.storage.search_manager import SearchManager
 from src.graph.cosmos_manager import CosmosGremlinManager
 from src.query_agent.ontology_engine import OntologyEngine
 from src.models.models import SCHEMA_CONFIG
-from src.query_agent.state import InvestigationState, VerifiedFact, PendingFactApproval
+from langchain_core.runnables import RunnableConfig
+from src.query_agent.state import (
+    InvestigationState,
+    InvestigationInputState,
+    InvestigationOutputState,
+    VerifiedFact,
+    PendingFactApproval,
+    UserMessage,
+    AssistantMessage,
+    ChatMessage
+)
 
 logger = logging.getLogger(__name__)
+
+def trim_messages(messages: List[ChatMessage], max_history: int = 10) -> List[ChatMessage]:
+    """Keeps all system messages and the last N user/assistant/tool messages."""
+    system_msgs = [m for m in messages if (isinstance(m, dict) and m.get("role") == "system") or getattr(m, "role", "") == "system"]
+    other_msgs = [m for m in messages if not ((isinstance(m, dict) and m.get("role") == "system") or getattr(m, "role", "") == "system")]
+    return system_msgs + other_msgs[-max_history:]
 
 # Core LLM call helper
 async def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 1000, temperature: float = 0.0) -> str:
@@ -67,7 +83,10 @@ async def rerank_chunks_llm(query: str, chunks: List[Dict[str, Any]], top_n: int
 
 
 # Node 1: Hydrate Node (Validation)
-async def hydrate_node(state: InvestigationState) -> Command[Literal["process_hitl", "coordinator"]]:
+async def hydrate_node(state: InvestigationState, config: RunnableConfig) -> Command[Literal["process_hitl", "coordinator"]]:
+    node_name = config.get("metadata", {}).get("langgraph_node", "unknown")
+    step = config.get("metadata", {}).get("langgraph_step", 1)
+    logger.info(f"[GRAPH][STEP {step}][NODE {node_name}] Executing node. Current task: {state.current_task}")
     logger.info("[hydrate_node] Validating incoming state payload.")
     if not state.doc_id or not state.doc_id.strip():
         raise ValueError("doc_id partition context is required to ensure partition-level data isolation.")
@@ -86,7 +105,10 @@ async def hydrate_node(state: InvestigationState) -> Command[Literal["process_hi
 
 
 # Node 2: Process HITL Node
-async def process_hitl_node(state: InvestigationState) -> Dict[str, Any]:
+async def process_hitl_node(state: InvestigationState, config: RunnableConfig) -> Dict[str, Any]:
+    node_name = config.get("metadata", {}).get("langgraph_node", "unknown")
+    step = config.get("metadata", {}).get("langgraph_step", 1)
+    logger.info(f"[GRAPH][STEP {step}][NODE {node_name}] Executing node. Current task: {state.current_task}")
     logger.info(f"[process_hitl_node] Processing user feedback: '{state.user_feedback}'")
     
     # We must operate on copies to ensure correct state updates in LangGraph
@@ -99,10 +121,9 @@ async def process_hitl_node(state: InvestigationState) -> Dict[str, Any]:
         feedback_clean = feedback.strip().lower()
         if feedback_clean == "rejected":
             logger.info(f"[HITL_MONITOR] [REJECTED] Proposed fact '{pending.fact}' was rejected by user. Audit context: {pending.audit_trace}")
-            messages.append({
-                "role": "assistant",
-                "content": f"Fact proposal REJECTED by user: '{pending.fact}'"
-            })
+            messages.append(AssistantMessage(
+                content=f"Fact proposal REJECTED by user: '{pending.fact}'"
+            ))
         else:
             # If "approved", use the proposed fact; otherwise, use the modified text
             fact_text = pending.fact if feedback_clean == "approved" else feedback
@@ -116,10 +137,9 @@ async def process_hitl_node(state: InvestigationState) -> Dict[str, Any]:
                 audit_trace=pending.audit_trace
             )
             verified_facts.append(new_fact)
-            messages.append({
-                "role": "assistant",
-                "content": f"Verified fact ADMITTED to ledger: '{fact_text}' (Source: {new_fact.source_id})"
-            })
+            messages.append(AssistantMessage(
+                content=f"Verified fact ADMITTED to ledger: '{fact_text}' (Source: {new_fact.source_id})"
+            ))
 
     return {
         "verified_facts": verified_facts,
@@ -130,7 +150,10 @@ async def process_hitl_node(state: InvestigationState) -> Dict[str, Any]:
 
 
 # Node 3: Coordinator Node
-async def coordinator_node(state: InvestigationState) -> Command[Literal["doc_branch", "graph_branch", "finalizer"]]:
+async def coordinator_node(state: InvestigationState, config: RunnableConfig) -> Command[Literal["doc_branch", "graph_branch", "finalizer"]]:
+    node_name = config.get("metadata", {}).get("langgraph_node", "unknown")
+    step = config.get("metadata", {}).get("langgraph_step", 1)
+    logger.info(f"[GRAPH][STEP {step}][NODE {node_name}] Executing node. Current task: {state.current_task}")
     logger.info("[coordinator_node] Directing query routing and task planning.")
     
     plan = list(state.investigation_plan)
@@ -158,10 +181,9 @@ async def coordinator_node(state: InvestigationState) -> Command[Literal["doc_br
                 res_str = res_str.replace("```json", "").replace("```", "").strip()
             tasks = json.loads(res_str)
             plan = tasks
-            messages.append({
-                "role": "assistant",
-                "content": f"Created investigation plan: {', '.join(plan)}"
-            })
+            messages.append(AssistantMessage(
+                content=f"Created investigation plan: {', '.join(plan)}"
+            ))
         except Exception as e:
             logger.warning(f"Failed to generate planning list, using fallback: {e}")
             plan = [user_query]
@@ -169,13 +191,29 @@ async def coordinator_node(state: InvestigationState) -> Command[Literal["doc_br
     # Pop next task if current_task is empty/complete
     if not current_task and plan:
         current_task = plan.pop(0)
-        messages.append({
-            "role": "assistant",
-            "content": f"Starting investigative task: '{current_task}'"
-        })
+        messages.append(AssistantMessage(
+            content=f"Starting investigative task: '{current_task}'"
+        ))
 
     # Determine branch to route to based on current task
     if not current_task:
+        messages = trim_messages(messages)
+        return Command(
+            update={
+                "investigation_plan": plan,
+                "current_task": current_task,
+                "messages": messages
+            },
+            goto="finalizer"
+        )
+
+    # Proactive recursion limit check
+    if state.remaining_steps is not None and state.remaining_steps <= 2:
+        logger.warning(f"[coordinator_node] Approaching recursion limit ({state.remaining_steps} steps left). Forcing fallback to finalizer.")
+        messages.append(AssistantMessage(
+            content=f"Approaching recursion limit ({state.remaining_steps} steps left). Transitioning to final report compilation."
+        ))
+        messages = trim_messages(messages)
         return Command(
             update={
                 "investigation_plan": plan,
@@ -200,6 +238,7 @@ async def coordinator_node(state: InvestigationState) -> Command[Literal["doc_br
     except Exception:
         goto = ["doc_branch", "graph_branch"]
 
+    messages = trim_messages(messages)
     return Command(
         update={
             "investigation_plan": plan,
@@ -212,7 +251,10 @@ async def coordinator_node(state: InvestigationState) -> Command[Literal["doc_br
 
 
 # Node 4: Doc Branch Node
-async def doc_branch_node(state: InvestigationState) -> Dict[str, Any]:
+async def doc_branch_node(state: InvestigationState, config: RunnableConfig) -> Dict[str, Any]:
+    node_name = config.get("metadata", {}).get("langgraph_node", "unknown")
+    step = config.get("metadata", {}).get("langgraph_step", 1)
+    logger.info(f"[GRAPH][STEP {step}][NODE {node_name}] Executing node. Current task: {state.current_task}")
     logger.info(f"[doc_branch_node] Querying vector search for: '{state.current_task}'")
     
     # 1. Generate optimal search query
@@ -239,7 +281,10 @@ async def doc_branch_node(state: InvestigationState) -> Dict[str, Any]:
 
 
 # Node 5: Graph Branch Node
-async def graph_branch_node(state: InvestigationState) -> Dict[str, Any]:
+async def graph_branch_node(state: InvestigationState, config: RunnableConfig) -> Dict[str, Any]:
+    node_name = config.get("metadata", {}).get("langgraph_node", "unknown")
+    step = config.get("metadata", {}).get("langgraph_step", 1)
+    logger.info(f"[GRAPH][STEP {step}][NODE {node_name}] Executing node. Current task: {state.current_task}")
     logger.info(f"[graph_branch_node] Querying graph traversal for: '{state.current_task}'")
     
     # 1. LLM decision on graph action
@@ -290,7 +335,10 @@ async def graph_branch_node(state: InvestigationState) -> Dict[str, Any]:
 
 
 # Node 6: Synthesis Node
-async def synthesis_node(state: InvestigationState) -> Dict[str, Any]:
+async def synthesis_node(state: InvestigationState, config: RunnableConfig) -> Dict[str, Any]:
+    node_name = config.get("metadata", {}).get("langgraph_node", "unknown")
+    step = config.get("metadata", {}).get("langgraph_step", 1)
+    logger.info(f"[GRAPH][STEP {step}][NODE {node_name}] Executing node. Current task: {state.current_task}")
     logger.info("[synthesis_node] Merging graph and vector search evidence.")
     
     doc_res = state.transient_doc_results or "No vector search results."
@@ -311,7 +359,10 @@ async def synthesis_node(state: InvestigationState) -> Dict[str, Any]:
 
 
 # Node 7: Extraction Node
-async def extraction_node(state: InvestigationState) -> Command[Literal["halt_for_hitl", "planner"]]:
+async def extraction_node(state: InvestigationState, config: RunnableConfig) -> Command[Literal["halt_for_hitl", "planner"]]:
+    node_name = config.get("metadata", {}).get("langgraph_node", "unknown")
+    step = config.get("metadata", {}).get("langgraph_step", 1)
+    logger.info(f"[GRAPH][STEP {step}][NODE {node_name}] Executing node. Current task: {state.current_task}")
     logger.info("[extraction_node] Extracting admissible facts from synthesized evidence.")
     
     synthesis = state.transient_synthesis_results or ""
@@ -375,19 +426,31 @@ async def extraction_node(state: InvestigationState) -> Command[Literal["halt_fo
 
 
 # Node 8: Halt for HITL Node
-async def halt_for_hitl_node(state: InvestigationState) -> Dict[str, Any]:
+async def halt_for_hitl_node(state: InvestigationState, config: RunnableConfig) -> Dict[str, Any]:
+    node_name = config.get("metadata", {}).get("langgraph_node", "unknown")
+    step = config.get("metadata", {}).get("langgraph_step", 1)
+    logger.info(f"[GRAPH][STEP {step}][NODE {node_name}] Executing node. Current task: {state.current_task}")
     logger.info("[halt_for_hitl_node] Halting graph execution. Awaiting user fact approval.")
     return {}
 
 
 # Node 9: Planner Node
-async def planner_node(state: InvestigationState) -> Command[Literal["coordinator", "finalizer"]]:
+async def planner_node(state: InvestigationState, config: RunnableConfig) -> Command[Literal["coordinator", "finalizer"]]:
+    node_name = config.get("metadata", {}).get("langgraph_node", "unknown")
+    step = config.get("metadata", {}).get("langgraph_step", 1)
+    logger.info(f"[GRAPH][STEP {step}][NODE {node_name}] Executing node. Current task: {state.current_task}")
     goto = "coordinator" if state.investigation_plan else "finalizer"
+    if state.remaining_steps is not None and state.remaining_steps <= 2:
+        logger.warning(f"[planner_node] Approaching recursion limit ({state.remaining_steps} steps left). Forcing fallback to finalizer.")
+        goto = "finalizer"
     return Command(goto=goto)
 
 
 # Node 10: Finalizer Node (Sanitizer)
-async def finalizer_node(state: InvestigationState) -> Dict[str, Any]:
+async def finalizer_node(state: InvestigationState, config: RunnableConfig) -> Dict[str, Any]:
+    node_name = config.get("metadata", {}).get("langgraph_node", "unknown")
+    step = config.get("metadata", {}).get("langgraph_step", 1)
+    logger.info(f"[GRAPH][STEP {step}][NODE {node_name}] Executing node. Current task: {state.current_task}")
     logger.info("[finalizer_node] Generating final answer strictly based on Verified Facts ledger.")
     
     ledger_content = []
@@ -402,9 +465,17 @@ async def finalizer_node(state: InvestigationState) -> Dict[str, Any]:
     
     final_answer = await call_llm(system_prompt, user_prompt)
     
+    # Append best-effort notice if execution was forced to finalize due to step exhaustion
+    if state.remaining_steps is not None and state.remaining_steps <= 2:
+        final_answer = final_answer + "\n\n⚠️ Note: This report was generated on a best-effort basis due to execution step limits. Some investigative tasks may not have been fully explored."
+    
+    messages = list(state.messages)
+    messages = trim_messages(messages)
+
     # Sanitization: Prune payload state data to keep serialized size minimum
     return {
         "final_answer": final_answer,
+        "messages": messages,
         "investigation_plan": [],
         "explored_entities": [],
         "current_task": None,
@@ -418,7 +489,11 @@ async def finalizer_node(state: InvestigationState) -> Dict[str, Any]:
 
 # Compile the LangGraph
 def get_investigative_graph():
-    builder = StateGraph(InvestigationState)
+    builder = StateGraph(
+        InvestigationState,
+        input_schema=InvestigationInputState,
+        output_schema=InvestigationOutputState
+    )
     
     builder.add_node("hydrate", hydrate_node)
     builder.add_node("process_hitl", process_hitl_node)

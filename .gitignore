@@ -49,3 +49,6 @@ downloads
 frontend/app/.env.local
 evals
 LangGraphDocs.md
+.superpowers
+.pytest_cache
+docs
