@@ -2,7 +2,7 @@ import logging
 import json
 import asyncio
 from typing import Dict, Any, List, Optional, Literal
-from langgraph.graph import StateGraph, END
+from langgraph.graph import StateGraph, END, START
 from langgraph.types import Command
 
 from src.utils.config import settings
@@ -67,10 +67,8 @@ async def rerank_chunks_llm(query: str, chunks: List[Dict[str, Any]], top_n: int
 
 
 # Node 1: Hydrate Node (Validation)
-async def hydrate_node(state: InvestigationState) -> Dict[str, Any]:
+async def hydrate_node(state: InvestigationState) -> Command[Literal["process_hitl", "coordinator"]]:
     logger.info("[hydrate_node] Validating incoming state payload.")
-    # Schema validation is guaranteed by Pydantic deserialization
-    # Session ownership validation:
     if not state.doc_id or not state.doc_id.strip():
         raise ValueError("doc_id partition context is required to ensure partition-level data isolation.")
     
@@ -79,12 +77,12 @@ async def hydrate_node(state: InvestigationState) -> Dict[str, Any]:
         logger.error(f"[hydrate_node] Unauthorized access attempt to doc_id: {state.doc_id}")
         raise PermissionError(f"Unauthorized access to document partition: {state.doc_id}")
 
-    return {}
-
-def entry_router(state: InvestigationState) -> str:
+    goto = "coordinator"
     if state.pending_fact_approval is not None and state.user_feedback is not None:
-        return "process_hitl"
-    return "coordinator"
+        goto = "process_hitl"
+
+    return Command(goto=goto)
+
 
 
 # Node 2: Process HITL Node
@@ -383,14 +381,9 @@ async def halt_for_hitl_node(state: InvestigationState) -> Dict[str, Any]:
 
 
 # Node 9: Planner Node
-async def planner_node(state: InvestigationState) -> Dict[str, Any]:
-    # Decides if more sub-tasks are left or if we route to finalizer
-    return {}
-
-def route_planner(state: InvestigationState) -> str:
-    if state.investigation_plan:
-        return "coordinator"
-    return "finalizer"
+async def planner_node(state: InvestigationState) -> Command[Literal["coordinator", "finalizer"]]:
+    goto = "coordinator" if state.investigation_plan else "finalizer"
+    return Command(goto=goto)
 
 
 # Node 10: Finalizer Node (Sanitizer)
@@ -439,15 +432,9 @@ def get_investigative_graph():
     builder.add_node("finalizer", finalizer_node)
     
     # Edges
-    builder.set_entry_point("hydrate")
-    builder.add_conditional_edges("hydrate", entry_router, {
-        "process_hitl": "process_hitl",
-        "coordinator": "coordinator"
-    })
+    builder.add_edge(START, "hydrate")
     
     builder.add_edge("process_hitl", "planner")
-    
-
     
     # Sync parallel execution results
     builder.add_edge("doc_branch", "synthesis")
@@ -455,14 +442,7 @@ def get_investigative_graph():
     
     builder.add_edge("synthesis", "extraction")
     
-
-    
     builder.add_edge("halt_for_hitl", END)
-    
-    builder.add_conditional_edges("planner", route_planner, {
-        "coordinator": "coordinator",
-        "finalizer": "finalizer"
-    })
     
     builder.add_edge("finalizer", END)
     
