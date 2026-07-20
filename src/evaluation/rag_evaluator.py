@@ -109,8 +109,13 @@ class RagEvaluator:
 
     async def _generate_answer(self, question: str, chunks: List[str]) -> str:
         """Simulates LLM answer generation."""
-        # Simple prompt for evaluation
-        prompt = f"Answer the question based ONLY on the provided chunks.\nChunks: {' '.join(chunks)}\nQuestion: {question}"
+        # Inject standard citation guidelines to ensure the model references chunks
+        citation_instr = (
+            "\nEvery fact or claim in your final response MUST end with a source citation referencing the exact chunk ID it came from. "
+            "Use the format: [Your text in Hebrew/English] (Source: [chunk_id]). "
+            "Example: 'החשוד נעצר ב-2026 (Source: chunk_123).'"
+        )
+        prompt = f"Answer the question based ONLY on the provided chunks.{citation_instr}\nChunks: {' '.join(chunks)}\nQuestion: {question}"
         response = await self.llm_client.chat.completions.create(
             model=settings.graphify_agent_model,
             messages=[{"role": "user", "content": prompt}],

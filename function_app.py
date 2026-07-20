@@ -146,12 +146,21 @@ async def _case_duplicate_preflight(filename_or_doc_id: str) -> Dict[str, Any]:
 
     cosmos_mgr = get_cosmos_manager()
     query = (
-        "g.V().has('partitionKey', pk).limit(1)"
+        "g.V().has('pk', pk).limit(1)"
         ".project('id', 'label', 'properties')"
         ".by(id()).by(label()).by(valueMap(true))"
     )
-    matched_by = "partitionKey"
+    matched_by = "pk"
     vertices = await cosmos_mgr.execute_query(query, {"pk": doc_id})
+
+    if not vertices:
+        query = (
+            "g.V().has('partitionKey', pk).limit(1)"
+            ".project('id', 'label', 'properties')"
+            ".by(id()).by(label()).by(valueMap(true))"
+        )
+        matched_by = "partitionKey"
+        vertices = await cosmos_mgr.execute_query(query, {"pk": doc_id})
 
     if not vertices:
         query = (

@@ -67,9 +67,9 @@ class CloudKnowledgeProvider:
 
         # Optimized counts using bindings
         if self.doc_id and self.doc_id != "global":
-            node_count_query = "g.V().has('partitionKey', pk).count()"
-            edge_count_query = "g.E().has('partitionKey', pk).count()"
-            node_types_query = "g.V().has('partitionKey', pk).label().dedup()"
+            node_count_query = "g.V().has('pk', pk).count()"
+            edge_count_query = "g.E().has('pk', pk).count()"
+            node_types_query = "g.V().has('pk', pk).label().dedup()"
             bindings = {"pk": self.doc_id}
         else:
             node_count_query = "g.V().count()"
@@ -125,7 +125,7 @@ class CloudKnowledgeProvider:
                 return []
 
             if self.doc_id and self.doc_id != "global":
-                gremlin_query = "g.V().has('partitionKey', pk)"
+                gremlin_query = "g.V().has('pk', pk)"
                 bindings = {"pk": self.doc_id}
             else:
                 gremlin_query = "g.V()"
@@ -285,7 +285,7 @@ class CloudKnowledgeProvider:
 
         if self.doc_id and self.doc_id != "global":
             query = (
-                "g.V(source).has('partitionKey', pk).repeat(outE().as('e').inV().as('v').has('partitionKey', pk).simplePath())"
+                "g.V(source).has('pk', pk).repeat(outE().as('e').inV().as('v').has('pk', pk).simplePath())"
                 ".until(hasId(target).or().loops().is(gt(hops)))"
                 ".hasId(target).path().by(elementMap()).limit(5)"
             )
@@ -372,6 +372,8 @@ class CloudKnowledgeProvider:
                 endpoint=self.search_mgr.endpoint,
                 index_name=settings.azure_search_index,
                 credential=self.search_mgr.credential,
+                connection_timeout=10,
+                read_timeout=30,
             ) as client:
                 # Request up to 100 candidate chunks to ensure sufficient matches after prefix filtering
                 vector_query = VectorizedQuery(
@@ -436,6 +438,8 @@ class CloudKnowledgeProvider:
                 endpoint=self.search_mgr.endpoint,
                 index_name=settings.azure_search_index,
                 credential=self.search_mgr.credential,
+                connection_timeout=10,
+                read_timeout=30,
             ) as client:
                 # Request up to 100 candidate chunks to ensure sufficient matches after prefix filtering
                 vector_query = VectorizedQuery(
@@ -488,7 +492,7 @@ class CloudKnowledgeProvider:
                 return "No relevant relation matches found."
 
             if self.doc_id and self.doc_id != "global":
-                gremlin_query = "g.E().has('partitionKey', pk)"
+                gremlin_query = "g.E().has('pk', pk)"
                 bindings = {"pk": self.doc_id}
             else:
                 gremlin_query = "g.E()"

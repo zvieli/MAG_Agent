@@ -50,14 +50,21 @@ class SearchManager:
                 raise RuntimeError(error_msg)
 
         self.index_client = SearchIndexClient(
-            endpoint=self.endpoint, credential=self.credential
+            endpoint=self.endpoint,
+            credential=self.credential,
+            connection_timeout=10,
+            read_timeout=30,
         )
         self._search_clients: Dict[str, SearchClient] = {}
 
     def get_search_client(self, index_name: str) -> SearchClient:
         if index_name not in self._search_clients:
             self._search_clients[index_name] = SearchClient(
-                endpoint=self.endpoint, index_name=index_name, credential=self.credential
+                endpoint=self.endpoint,
+                index_name=index_name,
+                credential=self.credential,
+                connection_timeout=10,
+                read_timeout=30,
             )
         return self._search_clients[index_name]
 

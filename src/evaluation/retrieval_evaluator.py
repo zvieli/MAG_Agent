@@ -15,9 +15,10 @@ class RetrievalEvaluator:
     Measures Hit Rate @ K and MRR.
     """
 
-    def __init__(self, storage: IBlobStorage, search_mgr: SearchManager):
+    def __init__(self, storage: IBlobStorage, search_mgr: SearchManager, llm_client: Any = None):
         self.storage = storage
         self.search_mgr = search_mgr
+        self.llm_client = llm_client
 
     async def evaluate(
         self, dataset_path: str = "evals/golden_dataset.jsonl"
@@ -60,11 +61,11 @@ class RetrievalEvaluator:
                 )
                 continue
 
-            # 1. Evaluate Node Retrieval
+            # 1. Evaluate Chunk Retrieval
             node_hits, node_mrr = await self._evaluate_index(
                 question,
                 query_vector[0],
-                settings.azure_search_index_nodes,
+                settings.azure_search_index,
                 expected_nodes,
                 id_field="id",
             )
@@ -77,7 +78,7 @@ class RetrievalEvaluator:
 
             results.append(
                 {
-                    "category": case["test_category"],
+                    "category": case.get("test_category", "default"),
                     "question": question,
                     "node_hits": node_hits,
                     "node_mrr": node_mrr,
@@ -115,6 +116,8 @@ class RetrievalEvaluator:
             endpoint=self.search_mgr.endpoint,
             index_name=index_name,
             credential=self.search_mgr.credential,
+            connection_timeout=10,
+            read_timeout=30,
         ) as client:
             vector_query = VectorizedQuery(
                 vector=vector, k_nearest_neighbors=5, fields="embedding"

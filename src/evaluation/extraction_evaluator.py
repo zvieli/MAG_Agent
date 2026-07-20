@@ -2,7 +2,7 @@ import asyncio
 import json
 import sys
 from pathlib import Path
-from typing import List, Dict
+from typing import List, Dict, Any
 
 # Ensure project root is in sys.path
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -88,11 +88,22 @@ def normalize_relation(relation: str) -> str:
         "ACCUSED": "TESTIFIED_ABOUT",
         "DESCRIBED": "TESTIFIED_ABOUT",
         "MENTIONED": "TESTIFIED_ABOUT",
+        # SEIZED_FROM
+        "SEIZED_FROM": "SEIZED_FROM",
+        "CONFISCATED_FROM": "SEIZED_FROM",
+        "TOOK_FROM": "SEIZED_FROM",
+        # OWNER_OF
+        "OWNER_OF": "OWNER_OF",
+        "OWNED_BY": "OWNER_OF",
+        "OWNS": "OWNER_OF",
+        # INVOLVED_IN
+        "INVOLVED_IN": "INVOLVED_IN",
+        "PARTICIPATED_IN": "INVOLVED_IN",
+        "ARRESTED_IN": "INVOLVED_IN",
         # RELATED_TO (Default for others)
         "RELATED_TO": "RELATED_TO",
         "WORKS_FOR": "RELATED_TO",
         "MEMBER_OF": "RELATED_TO",
-        "OWNED_BY": "RELATED_TO",
         "LOCATED_AT": "RELATED_TO",
         "PART_OF": "RELATED_TO",
         "ASSOCIATED_WITH": "RELATED_TO",
@@ -150,141 +161,117 @@ def normalize_relation(relation: str) -> str:
     return "RELATED_TO"
 
 
-async def run_evaluation():
+class ExtractionEvaluator:
     """
-    Runs the extraction engine evaluation against a golden dataset.
-
-    Measures precision, recall, and epistemic accuracy (confidence labels)
-    for extracted entities and relations.
+    Evaluates the extraction engine performance against a golden dataset.
     """
-    store = get_artifact_store()
-    if not store.exists(GOLDEN_DATASET_BLOB_PATH):
-        print(f"Error: Golden dataset not found in cloud at {GOLDEN_DATASET_BLOB_PATH}")
-        return
+    def __init__(self, storage: Any, search_mgr: Any = None, llm_client: Any = None):
+        self.storage = storage
+        self.search_mgr = search_mgr
+        self.llm_client = llm_client
 
-    results = []
-    content = store.read_bytes(GOLDEN_DATASET_BLOB_PATH).decode("utf-8")
-    for line in content.splitlines():
-        if line.strip():
-            results.append(json.loads(line))
+    async def evaluate(self, dataset_path: str = "evals/golden_extraction.jsonl") -> Dict[str, Any]:
+        logging_info = logging.info if "logging" in globals() else print
+        logging_error = logging.error if "logging" in globals() else print
 
-    total_precision = 0
-    total_recall = 0
-    total_epistemic_acc = 0
-    count = 0
+        logging_info(f"[EXTRACTION_EVAL] [START] | Dataset={dataset_path}")
+        try:
+            content = await self.storage.read_text(dataset_path)
+            cases = [json.loads(line) for line in content.splitlines() if line.strip()]
+        except Exception as e:
+            logging_error(f"[EXTRACTION_EVAL] [ERROR] | Error={str(e)}")
+            return {"status": "error", "message": str(e)}
 
-    print(fix_text("\n=== Extraction Engine Evaluation ===\n"))
+        total_precision = 0
+        total_recall = 0
+        total_epistemic_acc = 0
+        count = 0
+        results = []
 
-    for case in results:
-        input_text = case["input_text"]
-        expected_entities = case["expected_entities"]
-        expected_relations = case["expected_relations"]
-        category = case["test_category"]
+        for case in cases:
+            input_text = case["input_text"]
+            expected_entities = case["expected_entities"]
+            expected_relations = case["expected_relations"]
+            category = case.get("test_category", "default")
 
-        print(fix_text(f"Evaluating Case: {category}"))
-
-        # Call extraction engine (mocking chunk_label for evaluation)
-        extraction, _ = await extract_from_chunk(
-            None, input_text, SCHEMA_CONFIG, chunk_label=f"eval_{category}"
-        )
-
-        # Debug: Print raw extraction
-        print(f"DEBUG Raw Nodes: {[(n.id, n.label) for n in extraction.nodes]}")
-        print(
-            f"DEBUG Raw Edges: {[(e.source, e.relation, e.target, e.confidence) for e in extraction.edges]}"
-        )
-
-        # Create ID to Label mapping for better relation matching
-        id_to_label = {n.id: normalize_label(n.label) for n in extraction.nodes}
-
-        # Metrics for Entities
-        extracted_entities = [
-            {"label": normalize_label(n.label), "type": n.type}
-            for n in extraction.nodes
-        ]
-        expected_entities_norm = [
-            {"label": normalize_label(e["label"]), "type": e["type"]}
-            for e in expected_entities
-        ]
-
-        ent_precision, ent_recall = calculate_precision_recall(
-            extracted_entities, expected_entities_norm, "label"
-        )
-
-        # Metrics for Relations
-        extracted_relations = []
-        for r in extraction.edges:
-            conf, _ = normalize_confidence_label(
-                r.confidence, getattr(r, "confidence_score", None)
-            )
-            extracted_relations.append(
-                {
-                    "source": id_to_label.get(r.source, r.source),
-                    "target": id_to_label.get(r.target, r.target),
-                    "relation": normalize_relation(r.relation),
-                    "confidence": conf,
-                }
+            extraction, _ = await extract_from_chunk(
+                None, input_text, SCHEMA_CONFIG, chunk_label=f"eval_{category}"
             )
 
-        expected_relations_norm = []
-        for r in expected_relations:
-            expected_relations_norm.append(
-                {**r, "relation": normalize_relation(r.get("relation", ""))}
+            id_to_label = {n.id: normalize_label(n.label) for n in extraction.nodes}
+
+            # Normalize entities
+            extracted_entities = [
+                {"label": normalize_label(n.label), "type": n.type}
+                for n in extraction.nodes
+            ]
+            expected_entities_norm = [
+                {"label": normalize_label(e["label"]), "type": e["type"]}
+                for e in expected_entities
+            ]
+
+            ent_precision, ent_recall = calculate_precision_recall(
+                extracted_entities, expected_entities_norm, "label"
             )
 
-        rel_precision, rel_recall = calculate_precision_recall(
-            extracted_relations, expected_relations_norm, "relation"
-        )
+            # Normalize relations
+            extracted_relations = []
+            for r in extraction.edges:
+                conf, _ = normalize_confidence_label(
+                    r.confidence, getattr(r, "confidence_score", None)
+                )
+                extracted_relations.append(
+                    {
+                        "source": id_to_label.get(r.source, r.source),
+                        "target": id_to_label.get(r.target, r.target),
+                        "relation": normalize_relation(r.relation),
+                        "confidence": conf,
+                    }
+                )
 
-        # Epistemic Accuracy (specifically for confidence labels)
-        epistemic_acc = calculate_epistemic_accuracy(
-            extracted_relations, expected_relations
-        )
+            expected_relations_norm = []
+            for r in expected_relations:
+                expected_relations_norm.append(
+                    {**r, "relation": normalize_relation(r.get("relation", ""))}
+                )
 
-        # Average precision/recall for this case
-        case_precision = (ent_precision + rel_precision) / 2
-        case_recall = (ent_recall + rel_recall) / 2
-
-        print(
-            fix_text(
-                f"  Precision: {case_precision:.2f}, Recall: {case_recall:.2f}, Epistemic Acc: {epistemic_acc:.2f}"
+            rel_precision, rel_recall = calculate_precision_recall(
+                extracted_relations, expected_relations_norm, "relation"
             )
-        )
-        print(
-            fix_text(
-                f"  Extracted Entities: {[e['label'] for e in extracted_entities]}"
-            )
-        )
-        print(
-            fix_text(f"  Expected Entities:  {[e['label'] for e in expected_entities]}")
-        )
-        print(
-            fix_text(
-                f"  Extracted Relations: {[(r['source'], r['relation'], r['target']) for r in extracted_relations]}"
-            )
-        )
-        print(
-            fix_text(
-                f"  Expected Relations:  {[(r['source'], r['relation'], r['target']) for r in expected_relations]}"
-            )
-        )
 
-        total_precision += case_precision
-        total_recall += case_recall
-        total_epistemic_acc += epistemic_acc
-        count += 1
+            epistemic_acc = calculate_epistemic_accuracy(
+                extracted_relations, expected_relations
+            )
 
-    if count > 0:
-        avg_precision = total_precision / count
-        avg_recall = total_recall / count
-        avg_epistemic = total_epistemic_acc / count
+            case_precision = (ent_precision + rel_precision) / 2
+            case_recall = (ent_recall + rel_recall) / 2
 
-        print("\n" + "=" * 30)
-        print(fix_text(f"FINAL RESULTS ({count} cases)"))
-        print(f"Average Precision: {avg_precision:.2f}")
-        print(f"Average Recall:    {avg_recall:.2f}")
-        print(f"Average Epistemic Accuracy: {avg_epistemic:.2f}")
-        print("=" * 30)
+            total_precision += case_precision
+            total_recall += case_recall
+            total_epistemic_acc += epistemic_acc
+            count += 1
+
+            results.append({
+                "category": category,
+                "precision": case_precision,
+                "recall": case_recall,
+                "epistemic_acc": epistemic_acc,
+                "extracted_entities": [e['label'] for e in extracted_entities],
+                "expected_entities": [e['label'] for e in expected_entities],
+                "extracted_relations": [(r['source'], r['relation'], r['target']) for r in extracted_relations],
+                "expected_relations": [(r['source'], r['relation'], r['target']) for r in expected_relations]
+            })
+
+        summary = {
+            "status": "success",
+            "total_cases": count,
+            "avg_precision": total_precision / count if count > 0 else 0.0,
+            "avg_recall": total_recall / count if count > 0 else 0.0,
+            "avg_epistemic_acc": total_epistemic_acc / count if count > 0 else 0.0,
+            "cases": results
+        }
+        logging_info(f"[EXTRACTION_EVAL] [SUCCESS] | AvgPrecision={summary['avg_precision']:.2f}")
+        return summary
 
 
 def calculate_precision_recall(
@@ -361,4 +348,16 @@ def calculate_epistemic_accuracy(
 
 
 if __name__ == "__main__":
-    asyncio.run(run_evaluation())
+    import logging
+    from src.storage.factory import get_artifact_store
+    logging.basicConfig(level=logging.INFO)
+    class LocalStoreWrapper:
+        async def read_text(self, path: str) -> str:
+            return get_artifact_store().read_bytes(path).decode("utf-8")
+
+    async def main():
+        evaluator = ExtractionEvaluator(LocalStoreWrapper())
+        summary = await evaluator.evaluate(GOLDEN_DATASET_BLOB_PATH)
+        print(summary)
+
+    asyncio.run(main())

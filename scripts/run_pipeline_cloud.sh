@@ -26,9 +26,11 @@ if [ ! -z "$AUTH_KEY" ]; then
 fi
 
 echo "--- Submitting Pipeline to Azure ---"
+PDF_FILENAME=$(basename "$PDF_PATH")
 RESPONSE=$(curl -s -X POST \
   "$APP_URL/api/pipelines" \
   -H "Content-Type: application/pdf" \
+  -H "Content-Disposition: attachment; filename=\"${PDF_FILENAME}\"" \
   $AUTH_HEADER \
   --data-binary "@$PDF_PATH")
 

@@ -121,3 +121,60 @@ async def test_embedding_generation_times_out(monkeypatch):
 
     with pytest.raises(TimeoutError, match="OpenAI embedding request timed out"):
         await activities._generate_embeddings(["hello"])
+
+
+@pytest.mark.asyncio
+async def test_dependency_checker_reports_all_configs(monkeypatch):
+    checker = DependencyChecker(timeout_seconds=1)
+
+    async def healthy():
+        return "ok"
+
+    checker._check_storage_config = healthy
+    checker._check_openai = healthy
+    checker._check_document_intelligence = healthy
+    checker._check_search = healthy
+    checker._check_cosmos = healthy
+
+    from src.operations import dependency_checker
+
+    # Setup monkeypatch config values
+    monkeypatch.setattr(dependency_checker.settings, "azure_openai_endpoint", "https://api.openai.com")
+    monkeypatch.setattr(dependency_checker.settings, "azure_openai_api_key", "sk-proj-12345678openai")
+    monkeypatch.setattr(dependency_checker.settings, "azure_search_endpoint", "https://my-search.search.windows.net")
+    monkeypatch.setattr(dependency_checker.settings, "azure_search_key", "searchkey-12345678")
+    monkeypatch.setattr(dependency_checker.settings, "cosmos_gremlin_endpoint", "https://my-cosmos.gremlin.cosmos.azure.com:443/")
+    monkeypatch.setattr(dependency_checker.settings, "cosmos_gremlin_key", "cosmoskey-12345678")
+
+    from src.utils.config_manager import config_manager
+    monkeypatch.setattr(config_manager, "connection_string", "DefaultEndpointsProtocol=https;AccountName=myaccount;AccountKey=mykey;")
+
+    result = await checker.check_all(include_optional=True)
+    configs = result["configuration"]
+
+    # Verify storage_config
+    assert "storage_config" in configs
+    assert configs["storage_config"]["container_name"] == config_manager.container_name
+    assert configs["storage_config"]["connection_string_configured"] is True
+    assert configs["storage_config"]["connection_string_preview"] == "Defa...key;"
+
+    # Verify openai
+    assert "openai" in configs
+    assert configs["openai"]["azure_endpoint"] == "https://api.openai.com"
+    assert configs["openai"]["azure_key_configured"] is True
+    assert configs["openai"]["azure_key_preview"] == "sk-p...enai"
+
+    # Verify azure_search
+    assert "azure_search" in configs
+    assert configs["azure_search"]["endpoint"] == "https://my-search.search.windows.net"
+    assert configs["azure_search"]["endpoint_host"] == "my-search.search.windows.net"
+    assert configs["azure_search"]["key_configured"] is True
+    assert configs["azure_search"]["key_preview"] == "sear...5678"
+
+    # Verify cosmos_db
+    assert "cosmos_db" in configs
+    assert configs["cosmos_db"]["gremlin_endpoint"] == "https://my-cosmos.gremlin.cosmos.azure.com:443/"
+    assert configs["cosmos_db"]["endpoint_host"] == "my-cosmos.gremlin.cosmos.azure.com"
+    assert configs["cosmos_db"]["key_configured"] is True
+    assert configs["cosmos_db"]["key_preview"] == "cosm...5678"
+

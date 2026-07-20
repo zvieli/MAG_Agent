@@ -214,7 +214,36 @@ async def run():
 asyncio.run(run())
 "
 ```
+### Clear a Srarch Index
 
+
+
+```bash
+.venv/bin/python -c "
+from src.storage.search_manager import SearchManager
+import asyncio
+async def run():
+    manager = SearchManager()
+    index_name = 'graphify-chunks'
+    try:
+        print(f'Clearing index: {index_name}...')
+        search_client = manager.get_search_client(index_name)
+        results = await search_client.search(search_text='*', select=['id'])
+        doc_ids = []
+        async for r in results:
+            doc_ids.append({'id': r['id']})
+        if doc_ids:
+            print(f'Deleting {len(doc_ids)} documents...')
+            await search_client.delete_documents(documents=doc_ids)
+            print('Clear complete.')
+        else:
+            print('Index is already empty.')
+    except Exception as e:
+        print(f'Error: {e}')
+    finally: await manager.close()
+asyncio.run(run())
+"
+```
 ---
 
 ## 📋 System Monitoring

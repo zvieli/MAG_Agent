@@ -51,7 +51,7 @@
     "ORGANIZATION": "Specific companies, corporations, media outlets, or military units mentioned in the context.",
     "EXHIBIT": "Any physical item, encrypted device, raw audio/video logging, or physical evidence seized or presented during the investigation (e.g., 'encrypted phone', 'USB drive').",
     "DOCUMENT": "Official documents or contracts. DOMAIN FILTER: Ignore standard administrative/HR contracts (e.g., 'section 12 of employment agreement') UNLESS they are explicitly referenced as part of the criminal investigation or fraud.",
-    "OFFENSE": "CRITICAL REIFICATION RULE: Every specific illegal action or criminal suspicion (e.g., 'bribery', 'concealing documents') MUST be extracted as an independent OFFENSE node. Do not just embed it in a summary.",
+    "OFFENSE": "Only extract highly formalized, named criminal cases, indictments, or official statutes (e.g., 'תיק 4000', 'חוק העונשין'). DO NOT extract individual criminal actions (like 'bribery', 'transfer of 50,000 NIS', or 'עבירה') as independent nodes; these must strictly be represented as RELATIONSHIPS (e.g., 'BRIBERY', 'FINANCIAL_TRANSFER') between the human/corporate entities, with amounts and details embedded inside the relationship's description/properties.",
     "EVENT": "A specific, time-bound occurrence, meeting, or action. Date/Location Constraint: For every Event, you MUST extract a 'Date' and a 'Location' (if present). If missing, use the most specific segment context to form a unique ID."
   },
   "legal_role_map": {
@@ -363,7 +363,7 @@
       "tags": []
     },
     "RELATED_TO": {
-      "description": "A generic, fallback contextual link between two entities. Use ONLY if no specific behavioral relation applies.",
+      "description": "A generic fallback link. CRITICAL: Avoid using RELATED_TO if any specific relation (e.g., FINANCIAL_TRANSFER, COMMUNICATED_WITH, BRIBERY, INSTRUCTED) applies. The use of RELATED_TO for financial or communication actions will be heavily penalized.",
       "tags": []
     },
     "REQUESTED": {
@@ -403,7 +403,7 @@
       "tags": []
     },
     "SEIZED_FROM": {
-      "description": "The act of taking possession of an item or evidence by law enforcement from a suspect or location.",
+      "description": "The act of taking possession of an item or evidence (EXHIBIT) during an arrest or investigation (EVENT), or from a suspect or location.",
       "tags": []
     },
     "MEETING": {

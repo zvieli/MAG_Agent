@@ -62,6 +62,14 @@ def _infer_semantic_class(node: dict[str, Any], schema_config: Any) -> str:
     if node_type in date_types:
         return "date"
 
+    # Dynamic check using semantic_class_type_map from schema config
+    # Exclude generic fallback types to allow name/pattern inference
+    if _norm_type(node_type) not in ["", "other", "otherentity", "other_entity"]:
+        type_map = getattr(schema_config, "semantic_class_type_map", {}) or {}
+        for sem_class, typ in type_map.items():
+            if _norm_type(node_type) == _norm_type(typ):
+                return sem_class
+
     label = str(node.get("label", ""))
     node_id = str(node.get("id", ""))
     summary = str(node.get("forensic_summary") or node.get("description") or "")
@@ -77,10 +85,12 @@ def _infer_semantic_class(node: dict[str, Any], schema_config: Any) -> str:
         if _configured_marker_match(text, markers):
             return str(semantic_class)
 
-    normalized_label = _normalize_person_name(label, schema_config)
-    label_tokens = normalized_label.split()
-    if len(label_tokens) >= 2 and not any(char.isdigit() for char in normalized_label):
-        return "person"
+    # Only fallback to person if the node type is general/unspecified or a known human type
+    if node_type in ["", "other", "otherentity", "other_entity", "person", "suspect", "witness", "accomplice"]:
+        normalized_label = _normalize_person_name(label, schema_config)
+        label_tokens = normalized_label.split()
+        if len(label_tokens) >= 2 and not any(char.isdigit() for char in normalized_label):
+            return "person"
 
     return "other"
 

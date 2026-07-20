@@ -57,5 +57,7 @@ services:
       start_period: 20s
 
 networks:
-  app-network:
+  default:
     driver: bridge
+    driver_opts:
+      com.docker.network.driver.mtu: "1280"

@@ -73,6 +73,8 @@ async def calculate_groundedness(answer: str, search_mgr: Any = None) -> float:
         endpoint=search_mgr.endpoint,
         index_name=settings.azure_search_index,
         credential=search_mgr.credential,
+        connection_timeout=10,
+        read_timeout=30,
     ) as client:
         for id_list in citation_groups:
             is_ref_valid = False

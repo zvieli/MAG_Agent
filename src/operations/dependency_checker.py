@@ -58,7 +58,11 @@ class DependencyChecker:
             "status": status,
             "dependencies": {probe.name: probe.as_dict() for probe in probes},
             "configuration": {
-                "document_intelligence": self._document_intelligence_config()
+                "storage_config": self._storage_config_info(),
+                "openai": self._openai_config(),
+                "document_intelligence": self._document_intelligence_config(),
+                "azure_search": self._azure_search_config(),
+                "cosmos_db": self._cosmos_db_config(),
             },
         }
 
@@ -171,6 +175,69 @@ class DependencyChecker:
             "max_attempts": settings.document_intelligence_max_attempts,
             "backoff_base_seconds": settings.document_intelligence_backoff_base,
             "backoff_max_seconds": settings.document_intelligence_backoff_max,
+        }
+
+    def _storage_config_info(self) -> dict[str, Any]:
+        from src.utils.config_manager import config_manager
+        conn_str = config_manager.connection_string
+        return {
+            "container_name": config_manager.container_name,
+            "connection_string_configured": bool(conn_str),
+            "connection_string_preview": self._mask_secret(conn_str),
+            "cloud_only": config_manager.cloud_only,
+            "ttl_seconds": config_manager.ttl_seconds,
+            "base_directory": str(config_manager._BASE_DIR),
+        }
+
+    def _openai_config(self) -> dict[str, Any]:
+        azure_key = settings.azure_openai_api_key
+        openai_key = settings.openai_api_key
+        return {
+            "azure_endpoint": settings.azure_openai_endpoint,
+            "azure_api_version": settings.azure_openai_api_version,
+            "azure_key_configured": bool(azure_key),
+            "azure_key_preview": self._mask_secret(azure_key),
+            "openai_api_key_configured": bool(openai_key),
+            "openai_api_key_preview": self._mask_secret(openai_key),
+            "openai_base_url": settings.openai_base_url,
+            "openai_api_version": settings.openai_api_version,
+            "graphify_extraction_model": settings.graphify_extraction_model,
+            "graphify_agent_model": settings.graphify_agent_model,
+            "azure_openai_embedding_deployment": settings.azure_openai_embedding_deployment,
+            "azure_openai_embedding_model": settings.azure_openai_embedding_model,
+            "openai_embedding_model": settings.openai_embedding_model,
+            "temperature": settings.llm_temperature,
+            "fallback_temperature": settings.llm_fallback_temperature,
+            "timeout_seconds": settings.llm_request_timeout_seconds,
+        }
+
+    def _azure_search_config(self) -> dict[str, Any]:
+        endpoint = settings.azure_search_endpoint
+        parsed = urlparse(endpoint) if endpoint else None
+        key = settings.azure_search_key
+        return {
+            "endpoint": endpoint,
+            "endpoint_host": parsed.hostname if parsed else None,
+            "key_configured": bool(key),
+            "key_preview": self._mask_secret(key),
+            "use_azure_search": settings.use_azure_search,
+            "index": settings.azure_search_index,
+            "index_nodes": settings.azure_search_index_nodes,
+            "index_edges": settings.azure_search_index_edges,
+        }
+
+    def _cosmos_db_config(self) -> dict[str, Any]:
+        endpoint = settings.cosmos_gremlin_endpoint
+        parsed = urlparse(endpoint) if endpoint else None
+        key = settings.cosmos_gremlin_key
+        return {
+            "gremlin_endpoint": endpoint,
+            "endpoint_host": parsed.hostname if parsed else None,
+            "key_configured": bool(key),
+            "key_preview": self._mask_secret(key),
+            "database": settings.cosmos_database,
+            "graph": settings.cosmos_graph,
+            "batch_size": settings.cosmos_batch_size,
         }
 
     @staticmethod

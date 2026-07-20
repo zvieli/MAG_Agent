@@ -59,7 +59,7 @@ async def delete_run_by_pk(pk_to_delete):
     
     # 1. מחיקת כל הקשתות (Edges) המקושרות ל-PK הזה
     # בגרף, קשת חייבת להימחק לפני הצומת כדי למנוע שגיאות
-    delete_edges = f"g.E().has('partitionKey', '{pk_to_delete}').drop()"
+    delete_edges = f"g.E().has('pk', '{pk_to_delete}').drop()"
     await cosmos_mgr.execute_query(delete_edges)
     print("Edges deleted.")
     

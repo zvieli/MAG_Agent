@@ -31,7 +31,7 @@ async def test_query_translation_positive_path(mock_schema):
     mock_choices = MagicMock()
     mock_message = MagicMock()
     
-    mock_message.content = "g.V().has('partitionKey', 'test_doc_id').has('type', 'SUSPECT').limit(50)"
+    mock_message.content = "g.V().has('pk', 'test_doc_id').has('type', 'SUSPECT').limit(50)"
     mock_choices.message = mock_message
     mock_chat.create.return_value = MagicMock(choices=[mock_choices])
     mock_client.chat.completions = mock_chat
@@ -41,26 +41,24 @@ async def test_query_translation_positive_path(mock_schema):
         query = await builder.build_gremlin_query("Who are the suspects in this case?", safety_limit=50)
 
         assert "test_doc_id" in query
-        assert "has('partitionKey', 'test_doc_id')" in query
+        assert "has('pk', 'test_doc_id')" in query
         assert "has('type', 'SUSPECT')" in query
         assert "חשוד" not in query
         assert ".limit(50)" in query
-        assert query == "g.V().has('partitionKey', 'test_doc_id').has('type', 'SUSPECT').limit(50)"
+        assert query == "g.V().has('pk', 'test_doc_id').has('type', 'SUSPECT').limit(50)"
 
 
 @pytest.mark.asyncio
 async def test_partition_enforcement_security(mock_schema):
     """
-    Test Partition Enforcement (Security):
-    Input: Any arbitrary query.
-    Validate that the builder always injects the partitionKey filter, even if the LLM fails to include it.
+    Validate that the builder always injects the pk filter, even if the LLM fails to include it.
     """
     mock_client = MagicMock()
     mock_chat = AsyncMock()
     mock_choices = MagicMock()
     mock_message = MagicMock()
     
-    # LLM output missing the partitionKey check and limit
+    # LLM output missing the pk check and limit
     mock_message.content = "g.V().has('type', 'ORGANIZATION')"
     mock_choices.message = mock_message
     mock_chat.create.return_value = MagicMock(choices=[mock_choices])
@@ -70,9 +68,9 @@ async def test_partition_enforcement_security(mock_schema):
         builder = GraphQueryBuilder(mock_schema, doc_id="test_doc_id")
         query = await builder.build_gremlin_query("Any arbitrary query", safety_limit=50)
 
-        # Enforce that the builder injected the partitionKey and limit steps
+        # Enforce that the builder injected the pk and limit steps
         assert "test_doc_id" in query
-        assert "g.V().has('partitionKey', 'test_doc_id')" in query
+        assert "g.V().has('pk', 'test_doc_id')" in query
         assert ".limit(50)" in query
 
 
@@ -102,7 +100,7 @@ async def test_canonical_mapping(mock_schema):
     mock_message = MagicMock()
     
     # Simulating LLM correctly translating colloquial Hebrew term to DEFENDANT
-    mock_message.content = "g.V().has('partitionKey', 'test_doc_id').has('type', 'DEFENDANT').limit(50)"
+    mock_message.content = "g.V().has('pk', 'test_doc_id').has('type', 'DEFENDANT').limit(50)"
     mock_choices.message = mock_message
     mock_chat.create.return_value = MagicMock(choices=[mock_choices])
     mock_client.chat.completions = mock_chat

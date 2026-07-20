@@ -148,6 +148,10 @@ class CosmosGremlinManager:
             "resolved_aliases_data",
             "all_relations_history",
             "forensic_summary",
+            "description",
+            "pk",
+            "source_file",
+            "partitionKey",
         ]
 
         for k, v in data.items():
@@ -184,6 +188,8 @@ class CosmosGremlinManager:
                     if mk == "forensic_summary":
                         if isinstance(mv, str) and mv.strip():
                             clean_data["meta_forensic_summary"] = self._truncate_text(mv)
+                    elif mk == "description":
+                        continue
                     elif mk == "resolved_aliases_data":
                         self._add_alias_provenance(clean_data, mv)
                     elif mk == "all_relations_history":
@@ -199,6 +205,12 @@ class CosmosGremlinManager:
             # 4. Only keep primitive types for properties
             if isinstance(v, (str, int, float, bool)):
                 clean_data[k] = self._truncate_text(v) if isinstance(v, str) else v
+
+        # Unify fallback description into meta_forensic_summary if needed
+        if is_node and "meta_forensic_summary" not in clean_data:
+            raw_desc = data.get("description") or data.get("metadata", {}).get("description")
+            if raw_desc and isinstance(raw_desc, str) and raw_desc.strip():
+                clean_data["meta_forensic_summary"] = self._truncate_text(raw_desc)
 
         return clean_data
 
@@ -278,9 +290,11 @@ class CosmosGremlinManager:
         # Use type as label if available, fallback to 'Entity'
         node_type = node.get("type") or "Entity"
 
-        # OPTIMIZATION: Use doc_id/source_file as partition key for investigation locality
+        # OPTIMIZATION: Use pk as the unique partition key
         pk_value = (
-            node.get("source_file")
+            node.get("pk")
+            or node.get("partitionKey")
+            or node.get("source_file")
             or node.get("metadata", {}).get("source_file")
             or node.get("doc_id")
             or "global"
@@ -297,11 +311,11 @@ class CosmosGremlinManager:
             f"[COSMOS] [NODE_UPSERT] [START] | Metadata: NodeID={node_id}, Type={node_type}, PK={pk_value}, PropCount={len(clean_properties)} | Message: Initiating sanitized vertex upsert"
         )
 
-        # Include partitionKey in the lookup to ensure single-partition routing
+        # Include pk in the lookup to ensure single-partition routing
         query = (
-            "g.V(id).has('partitionKey', pk).fold().coalesce("
+            "g.V(id).has('pk', pk).fold().coalesce("
             "  unfold(), "
-            "  addV(label).property('id', id).property('partitionKey', pk).property('pk', pk)"
+            "  addV(label).property('id', id).property('pk', pk)"
             ")"
         )
 
@@ -309,7 +323,7 @@ class CosmosGremlinManager:
 
         idx = 0
         for k, v in clean_properties.items():
-            if k in ["id", "pk", "partitionKey"]:
+            if k in ["id", "pk", "source_file", "partitionKey"]:
                 continue
             prop_key = f"p_{idx}"
             query += f".property('{k}', {prop_key})"
@@ -336,9 +350,11 @@ class CosmosGremlinManager:
         relation = edge.get("relation") or "related_to"
         edge_id = f"{source}_{relation}_{target}"
 
-        # OPTIMIZATION: Use doc_id/source_file as partition key
+        # OPTIMIZATION: Use pk as the unique partition key
         pk_value = (
-            edge.get("source_file")
+            edge.get("pk")
+            or edge.get("partitionKey")
+            or edge.get("source_file")
             or edge.get("metadata", {}).get("source_file")
             or edge.get("doc_id")
             or "global"
@@ -352,10 +368,10 @@ class CosmosGremlinManager:
         )
 
         query = (
-            "g.V(source).has('partitionKey', pk).as('s').V(target).has('partitionKey', pk).as('t')"
+            "g.V(source).has('pk', pk).as('s').V(target).has('pk', pk).as('t')"
             ".coalesce("
             "  select('s').outE(rel).where(inV().hasId(target)),"
-            "  addE(rel).from('s').to('t').property('id', eid).property('partitionKey', pk)"
+            "  addE(rel).from('s').to('t').property('id', eid).property('pk', pk)"
             ")"
         )
 
@@ -369,7 +385,7 @@ class CosmosGremlinManager:
 
         idx = 0
         for k, v in clean_properties.items():
-            if k in ["source", "target", "relation", "id"]:
+            if k in ["source", "target", "relation", "id", "source_file", "partitionKey"]:
                 continue
             prop_key = f"ep_{idx}"
             query += f".property('{k}', {prop_key})"
@@ -392,7 +408,7 @@ class CosmosGremlinManager:
         Retrieves a single node and its properties from the graph.
         """
         if partition_key:
-            query = "g.V(id).has('partitionKey', pk)"
+            query = "g.V(id).has('pk', pk)"
             bindings = {"id": node_id, "pk": partition_key}
         else:
             query = "g.V(id)"
@@ -412,7 +428,7 @@ class CosmosGremlinManager:
         """
         if partition_key:
             query = (
-                "g.V(id).has('partitionKey', pk).outE().as('edge').inV().as('neighbor').select('edge', 'neighbor')"
+                "g.V(id).has('pk', pk).outE().as('edge').inV().as('neighbor').select('edge', 'neighbor')"
             )
             bindings = {"id": node_id, "pk": partition_key}
         else:
@@ -437,8 +453,8 @@ class CosmosGremlinManager:
         )
         if partition_key:
             query = (
-                "g.V().has('partitionKey', pk).hasLabel('PERSON', 'ORGANIZATION').as('a')"
-                ".outE('FINANCIAL_TRANSFER', 'IN_EXCHANGE_FOR').inV().has('partitionKey', pk).as('b')"
+                "g.V().has('pk', pk).hasLabel('PERSON', 'ORGANIZATION').as('a')"
+                ".outE('FINANCIAL_TRANSFER', 'IN_EXCHANGE_FOR').inV().has('pk', pk).as('b')"
                 ".outE().where(inV().hasId(select('a').id())).as('return_edge')"
                 ".select('a', 'b', 'return_edge').limit(20)"
             )
@@ -474,7 +490,7 @@ class CosmosGremlinManager:
         )
         if partition_key:
             query = (
-                "g.V().has('partitionKey', pk).project('id', 'label', 'degree', 'type', 'description')"
+                "g.V().has('pk', pk).project('id', 'label', 'degree', 'type', 'description')"
                 ".by('id').by(label).by(bothE().count())"
                 ".by(coalesce(values('type'), constant('Entity')))"
                 ".by(coalesce(values('description'), coalesce(values('meta_forensic_summary'), constant(''))))"
@@ -509,7 +525,7 @@ class CosmosGremlinManager:
         )
         if partition_key:
             query = (
-                "g.E().has('partitionKey', pk).has('meta_is_inferred', true).has('confidence_score', lt(limit))"
+                "g.E().has('pk', pk).has('meta_is_inferred', true).has('confidence_score', lt(limit))"
                 ".project('id', 'source', 'target', 'relation', 'score')"
                 ".by('id').by(outV().id()).by(inV().id()).by(label).by('confidence_score')"
                 ".limit(50)"

@@ -66,7 +66,7 @@ class OntologyEngine:
         # Define specialized tasks for each rule
         async def check_hearsay():
             query = (
-                "g.E().has('partitionKey', pk).has('epistemic_state', 'HEARSAY')"
+                "g.E().has('pk', pk).has('epistemic_state', 'HEARSAY')"
                 ".project('id', 'relation', 'source', 'target')"
                 ".by('id').by(label).by(outV().values('label').fold()).by(inV().values('label').fold())"
                 ".limit(50)"
@@ -91,7 +91,7 @@ class OntologyEngine:
 
         async def check_accomplice_corroboration():
             query = (
-                "g.E().has('partitionKey', pk).hasLabel('TESTIFIED_ABOUT')"
+                "g.E().has('pk', pk).hasLabel('TESTIFIED_ABOUT')"
                 ".where(outV().has('type', 'Accomplice'))"
                 ".project('id', 'relation', 'source', 'target')"
                 ".by('id').by(label).by(outV().values('label').fold()).by(inV().values('label').fold())"
@@ -117,7 +117,7 @@ class OntologyEngine:
 
         async def check_state_witness_corroboration():
             query = (
-                "g.E().has('partitionKey', pk).has('epistemic_state', 'STATE_WITNESS_TESTIMONY')"
+                "g.E().has('pk', pk).has('epistemic_state', 'STATE_WITNESS_TESTIMONY')"
                 ".project('id', 'relation', 'source', 'target')"
                 ".by('id').by(label).by(outV().values('label').fold()).by(inV().values('label').fold())"
                 ".limit(50)"
@@ -142,7 +142,7 @@ class OntologyEngine:
 
         async def check_mens_rea():
             query = (
-                "g.V().has('partitionKey', pk).has('type', 'Offense_Type').has('label', 'שוחד והפרת אמונים')"
+                "g.V().has('pk', pk).has('type', 'Offense_Type').has('label', 'שוחד והפרת אמונים')"
                 ".where(__.inE().outV().has('type', 'Mens_Rea').count().is(0))"
                 ".project('id', 'label')"
                 ".by('id').by('label')"
@@ -164,7 +164,7 @@ class OntologyEngine:
 
         async def check_conflict_of_interest():
             query = (
-                "g.E().has('partitionKey', pk).hasLabel('CONFLICT_OF_INTEREST')"
+                "g.E().has('pk', pk).hasLabel('CONFLICT_OF_INTEREST')"
                 ".project('id', 'relation', 'source', 'target')"
                 ".by('id').by(label).by(outV().values('label').fold()).by(inV().values('label').fold())"
                 ".limit(50)"
@@ -189,7 +189,7 @@ class OntologyEngine:
 
         async def check_investigative_corroboration():
             query = (
-                "g.V().has('partitionKey', pk).has('type', 'Offense_Type')"
+                "g.V().has('pk', pk).has('type', 'Offense_Type')"
                 ".project('id', 'label')"
                 ".by('id').by('label')"
                 ".limit(50)"
@@ -210,7 +210,7 @@ class OntologyEngine:
 
         async def check_hearsay_offense():
             query = (
-                "g.E().has('partitionKey', pk).has('epistemic_state', 'HEARSAY')"
+                "g.E().has('pk', pk).has('epistemic_state', 'HEARSAY')"
                 ".where(inV().has('type', 'Offense_Type'))"
                 ".project('id', 'relation', 'source', 'target')"
                 ".by('id').by(label).by(outV().values('label').fold()).by(inV().values('label').fold())"

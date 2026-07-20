@@ -78,9 +78,9 @@ class GraphQueryBuilder:
             if f"'{self.doc_id}'" not in query and f'"{self.doc_id}"' not in query:
                 logger.warning(f"[GraphQueryBuilder] Generated query missing partition isolation. Appending filter. Raw query: {query}")
                 if "g.V()" in query:
-                    query = query.replace("g.V()", f"g.V().has('partitionKey', '{self.doc_id}')")
+                    query = query.replace("g.V()", f"g.V().has('pk', '{self.doc_id}')")
                 else:
-                    query = f"g.V().has('partitionKey', '{self.doc_id}')." + query
+                    query = f"g.V().has('pk', '{self.doc_id}')." + query
 
             # Self-correction: Ensure limit(...) is present
             if ".limit(" not in query:
@@ -93,7 +93,7 @@ class GraphQueryBuilder:
         except Exception as e:
             logger.error(f"[GraphQueryBuilder] Gremlin translation failed: {e}", exc_info=True)
             # Safe default fallback query that returns suspects using the correct type property filter
-            return f"g.V().has('partitionKey', '{self.doc_id}').has('type', 'SUSPECT').limit({safety_limit})"
+            return f"g.V().has('pk', '{self.doc_id}').has('type', 'SUSPECT').limit({safety_limit})"
 
     def format_results(self, raw_results: List[Any]) -> str:
         """
@@ -173,7 +173,7 @@ class GraphQueryBuilder:
                 if source_loc:
                     additional_props.append(f"Source Location: {source_loc}")
 
-                source_file = _get_val("source_file")
+                source_file = _get_val("pk") or _get_val("partitionKey") or _get_val("source_file")
                 if source_file:
                     additional_props.append(f"Source File: {source_file}")
 

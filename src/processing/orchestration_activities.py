@@ -587,7 +587,7 @@ async def activity_cleanup_failed_run(payload: Dict[str, Any]) -> None:
             cosmos_mgr = get_cosmos_manager()
             logging.info(f"[ACTIVITY][CLEANUP_FAILED_RUN] Deleting partially synced Cosmos DB nodes/edges for doc_id: {doc_id}")
             # Cosmos partition key is doc_id
-            query = "g.V().has('partitionKey', pk).drop()"
+            query = "g.V().has('pk', pk).drop()"
             await cosmos_mgr.execute_query(query, {"pk": doc_id})
             logging.info(f"[ACTIVITY][CLEANUP_FAILED_RUN] Dropped Gremlin partition for: {doc_id}")
         except Exception as e:

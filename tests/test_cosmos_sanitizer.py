@@ -14,6 +14,8 @@ def test_node_sanitizer_compacts_investigative_metadata():
         "label": "אדם",
         "type": "PERSON",
         "forensic_summary": "סיכום חקירתי עשיר",
+        "description": "duplicate description text",
+        "pk": "some-pk",
         "event_date": "2026-01-05",
         "source_file": "case-1",
         "source_location": "Chunk 00001",
@@ -41,9 +43,12 @@ def test_node_sanitizer_compacts_investigative_metadata():
     clean = manager._sanitize_for_cosmos(node, is_node=True)
 
     assert clean["meta_forensic_summary"] == "סיכום חקירתי עשיר"
+    assert "description" not in clean
+    assert "pk" not in clean
+    assert "partitionKey" not in clean
+    assert "source_file" not in clean
     assert clean["event_date"] == "2026-01-05"
     assert clean["community"] == "c_1"
-    assert clean["source_file"] == "case-1"
     assert clean["source_location"] == "Chunk 00001"
     assert clean["alias_count"] == 2
     assert "person_1" in clean["alias_preview"]
@@ -51,6 +56,16 @@ def test_node_sanitizer_compacts_investigative_metadata():
     assert clean["meta_semantic_class"] == "person"
     assert "resolved_aliases_data" not in clean
     assert "forensic_summary" not in clean
+
+    node_without_summary = {
+        "id": "canonical_person",
+        "label": "אדם",
+        "type": "PERSON",
+        "description": "תיאור בלבד",
+    }
+    clean_without_summary = manager._sanitize_for_cosmos(node_without_summary, is_node=True)
+    assert clean_without_summary["meta_forensic_summary"] == "תיאור בלבד"
+    assert "description" not in clean_without_summary
 
 
 def test_edge_sanitizer_compacts_relation_history_and_source_files():

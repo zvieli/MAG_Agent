@@ -15,10 +15,13 @@ until curl -s "http://localhost:7071/api/ping" | grep -q "Healthy"; do
 done
 
 echo "--- Submitting Pipeline ---"
+PDF_PATH="data/sample_page_1.pdf"
+PDF_FILENAME=$(basename "$PDF_PATH")
 RESPONSE=$(curl -s -X POST \
      "http://localhost:7071/api/pipelines" \
      -H "Content-Type: application/pdf" \
-     --data-binary @data/files_03.01.2021_short_2pages.pdf)
+     -H "Content-Disposition: attachment; filename=\"${PDF_FILENAME}\"" \
+     --data-binary "@${PDF_PATH}")
 
 INSTANCE_ID=$(echo "$RESPONSE" | python3 -c "import sys, json; print(json.load(sys.stdin).get('id', ''))" 2>/dev/null)
 
@@ -48,5 +51,5 @@ while true; do
         break
     fi
     
-    sleep 5
+    sleep 3
 done
