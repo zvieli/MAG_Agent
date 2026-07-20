@@ -483,6 +483,16 @@ def _count_tokens(text: str, model: str = "gpt-4o") -> int:
     return len(encoding.encode(text or ""))
 
 
+def _format_page_label(pages: list[int]) -> str:
+    """Format page numbers into a human-readable label."""
+    if not pages:
+        return "Page 1"
+    pages = sorted(set(pages))
+    if len(pages) == 1:
+        return f"Page {pages[0]}"
+    return f"Pages {pages[0]}-{pages[-1]}"
+
+
 def _build_discrete_chunks(
     pages: list[dict[str, Any]],
     *,
@@ -507,37 +517,44 @@ def _build_discrete_chunks(
 
     overlap_count = SCHEMA_CONFIG.graph_analysis.chunk_overlap_sentences
 
-    full_text = ""
+    # Build paragraphs with page number tracking
+    tagged_paragraphs: list[tuple[str, int]] = []  # (paragraph_text, page_number)
     for p in pages:
-        full_text += p.get("text", "") + "\n\n"
+        page_num = p.get("page_number", 1)
+        page_text = p.get("text", "")
+        for para in page_text.split("\n\n"):
+            para = para.strip()
+            if para:
+                tagged_paragraphs.append((para, page_num))
 
-    paragraphs = full_text.split("\n\n")
     chunk_raw_texts: list[str] = []
-    current_chunk_text_list = []
+    chunk_page_sets: list[set[int]] = []  # page numbers per chunk
+    current_chunk_text_list: list[str] = []
+    current_pages: set[int] = set()
     current_token_count = 0
 
     extraction_model = getattr(settings, "graphify_extraction_model", "gpt-4o")
 
-    for para in paragraphs:
-        para = para.strip()
-        if not para:
-            continue
-
-        para_token_count = _count_tokens(para, extraction_model)
+    for para_text, page_num in tagged_paragraphs:
+        para_token_count = _count_tokens(para_text, extraction_model)
 
         if (
             current_token_count + para_token_count > max_tokens
             and current_chunk_text_list
         ):
             chunk_raw_texts.append("\n\n".join(current_chunk_text_list))
+            chunk_page_sets.append(current_pages)
             current_chunk_text_list = []
+            current_pages = set()
             current_token_count = 0
 
-        current_chunk_text_list.append(para)
+        current_chunk_text_list.append(para_text)
+        current_pages.add(page_num)
         current_token_count += para_token_count
 
     if current_chunk_text_list:
         chunk_raw_texts.append("\n\n".join(current_chunk_text_list))
+        chunk_page_sets.append(current_pages)
     final_chunks: list[dict[str, Any]] = []
     prev_chunk_text = ""
 
@@ -553,14 +570,16 @@ def _build_discrete_chunks(
                 chunk_text = f"{overlap_text} …\n\n{raw_text}"
 
         chunk_index = i + 1
+        chunk_pages = sorted(chunk_page_sets[i]) if i < len(chunk_page_sets) else [1]
         final_chunks.append(
             {
                 "index": chunk_index,
                 "chunk_index": chunk_index,
-                "label": f"Chunk {chunk_index}",
+                "label": _format_page_label(chunk_pages),
                 "text": chunk_text,
                 "word_count": _count_words(chunk_text),
                 "token_count": _count_tokens(chunk_text, extraction_model),
+                "page_range": chunk_pages,
             }
         )
         prev_chunk_text = raw_text

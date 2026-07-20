@@ -125,11 +125,37 @@ class CloudKnowledgeProvider:
                 return []
 
             if self.doc_id and self.doc_id != "global":
-                gremlin_query = "g.V().has('pk', pk)"
-                bindings = {"pk": self.doc_id}
+                if terms:
+                    or_steps = []
+                    bindings = {"pk": self.doc_id}
+                    for idx, term in enumerate(terms):
+                        t_key = f"t_{idx}"
+                        bindings[t_key] = term
+                        or_steps.append(f"has('label', containing({t_key}))")
+                        or_steps.append(f"has('id', containing({t_key}))")
+                        or_steps.append(f"has('type', containing({t_key}))")
+                        or_steps.append(f"has('meta_forensic_summary', containing({t_key}))")
+                        or_steps.append(f"has('description', containing({t_key}))")
+                    gremlin_query = f"g.V().has('pk', pk).or({', '.join(or_steps)})"
+                else:
+                    gremlin_query = "g.V().has('pk', pk)"
+                    bindings = {"pk": self.doc_id}
             else:
-                gremlin_query = "g.V()"
-                bindings = {}
+                if terms:
+                    or_steps = []
+                    bindings = {}
+                    for idx, term in enumerate(terms):
+                        t_key = f"t_{idx}"
+                        bindings[t_key] = term
+                        or_steps.append(f"has('label', containing({t_key}))")
+                        or_steps.append(f"has('id', containing({t_key}))")
+                        or_steps.append(f"has('type', containing({t_key}))")
+                        or_steps.append(f"has('meta_forensic_summary', containing({t_key}))")
+                        or_steps.append(f"has('description', containing({t_key}))")
+                    gremlin_query = f"g.V().or({', '.join(or_steps)})"
+                else:
+                    gremlin_query = "g.V()"
+                    bindings = {}
 
             vertices = await self.cosmos_mgr.execute_query(gremlin_query, bindings)
             
@@ -234,28 +260,41 @@ class CloudKnowledgeProvider:
 
             if neighbors:
                 for n in neighbors:
-                    edge = n.get("edge", {})
-                    neighbor = n.get("neighbor", {})
-                    neighbor_properties = neighbor.get("properties", {})
-                    target_type = "Entity"
-                    if "type" in neighbor and not isinstance(neighbor["type"], list):
-                        target_type = neighbor["type"]
-                    elif isinstance(neighbor_properties.get("type"), list) and len(neighbor_properties["type"]) > 0:
-                        target_type = neighbor_properties["type"][0].get("value", "Entity")
-                    elif isinstance(neighbor_properties.get("type"), str):
-                        target_type = neighbor_properties["type"]
+                    if "neighbor_id" in n:
+                        # Optimized projection format
+                        edge_label = n.get("edge_label")
+                        edge_props = n.get("edge_properties", {})
+                        neighbor_id = n.get("neighbor_id")
+                        neighbor_label = n.get("neighbor_label") or neighbor_id
+                        neighbor_type = n.get("neighbor_type") or "Entity"
+                    else:
+                        # Legacy format (for backward compatibility / mocks / tests)
+                        edge = n.get("edge", {})
+                        neighbor = n.get("neighbor", {})
+                        neighbor_properties = neighbor.get("properties", {})
+                        edge_label = edge.get("label")
+                        edge_props = {
+                            k: v
+                            for k, v in edge.items()
+                            if k not in ["id", "label"]
+                        }
+                        neighbor_id = neighbor.get("id")
+                        neighbor_label = neighbor.get("label") or neighbor_id
+                        neighbor_type = "Entity"
+                        if "type" in neighbor and not isinstance(neighbor["type"], list):
+                            neighbor_type = neighbor["type"]
+                        elif isinstance(neighbor_properties.get("type"), list) and len(neighbor_properties["type"]) > 0:
+                            neighbor_type = neighbor_properties["type"][0].get("value", "Entity")
+                        elif isinstance(neighbor_properties.get("type"), str):
+                            neighbor_type = neighbor_properties["type"]
 
                     context["relationships"].append(
                         {
-                            "relation": edge.get("label"),
-                            "target_id": neighbor.get("id"),
-                            "target_label": neighbor.get("label") or neighbor.get("id"),
-                            "target_type": target_type,
-                            "metadata": {
-                                k: v
-                                for k, v in edge.items()
-                                if k not in ["id", "label"]
-                            },
+                            "relation": edge_label,
+                            "target_id": neighbor_id,
+                            "target_label": neighbor_label,
+                            "target_type": neighbor_type,
+                            "metadata": edge_props,
                         }
                     )
 
@@ -492,11 +531,31 @@ class CloudKnowledgeProvider:
                 return "No relevant relation matches found."
 
             if self.doc_id and self.doc_id != "global":
-                gremlin_query = "g.E().has('pk', pk)"
-                bindings = {"pk": self.doc_id}
+                if terms:
+                    or_steps = []
+                    bindings = {"pk": self.doc_id}
+                    for idx, term in enumerate(terms):
+                        t_key = f"t_{idx}"
+                        bindings[t_key] = term
+                        or_steps.append(f"has('label', containing({t_key}))")
+                        or_steps.append(f"has('description', containing({t_key}))")
+                    gremlin_query = f"g.E().has('pk', pk).or({', '.join(or_steps)})"
+                else:
+                    gremlin_query = "g.E().has('pk', pk)"
+                    bindings = {"pk": self.doc_id}
             else:
-                gremlin_query = "g.E()"
-                bindings = {}
+                if terms:
+                    or_steps = []
+                    bindings = {}
+                    for idx, term in enumerate(terms):
+                        t_key = f"t_{idx}"
+                        bindings[t_key] = term
+                        or_steps.append(f"has('label', containing({t_key}))")
+                        or_steps.append(f"has('description', containing({t_key}))")
+                    gremlin_query = f"g.E().or({', '.join(or_steps)})"
+                else:
+                    gremlin_query = "g.E()"
+                    bindings = {}
 
             edges = await self.cosmos_mgr.execute_query(gremlin_query, bindings)
             

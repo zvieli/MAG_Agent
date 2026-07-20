@@ -88,6 +88,6 @@ async def delete_all_nodes():
     finally: await mgr.close()
 
 if __name__ == "__main__":
-    #asyncio.run(delete_all_nodes())
-    asyncio.run(analyze_pk_distribution())
-    asyncio.run(inspect_schema())
+    asyncio.run(delete_all_nodes())
+    # asyncio.run(analyze_pk_distribution())
+    # asyncio.run(inspect_schema())

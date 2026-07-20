@@ -336,6 +336,7 @@ async def activity_extract_chunk(payload: Dict[str, Any]) -> Dict[str, Any]:
             "chunk_id": chunk_id,
             "extraction": extraction.model_dump(),
             "token_usage": token_usage,
+            "source_label": chunk_data.get("label", f"Chunk {chunk_id}"),
         }
 
         return result_payload
@@ -362,18 +363,20 @@ async def activity_merge_partials(
         for result_data in extraction_results:
             doc_id = result_data.get("doc_id", doc_id)
             chunk_id = result_data.get("chunk_id", "unknown")
+            # Use page-based label if available, fall back to chunk ID
+            source_label = result_data.get("source_label") or f"Chunk {chunk_id}"
             extraction = RawGraphExtraction.model_validate(
                 result_data.get("extraction", {})
             )
             for node in extraction.nodes:
                 d = node.model_dump()
                 d["source_file"] = doc_id
-                d["source_location"] = f"Chunk {chunk_id}"
+                d["source_location"] = source_label
                 all_nodes.append(d)
             for edge in extraction.edges:
                 d = edge.model_dump()
                 d["source_file"] = doc_id
-                d["source_location"] = f"Chunk {chunk_id}"
+                d["source_location"] = source_label
                 all_edges.append(d)
 
         resolver = DefaultEntityResolver(SCHEMA_CONFIG)

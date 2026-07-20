@@ -15,7 +15,7 @@ until curl -s "http://localhost:7071/api/ping" | grep -q "Healthy"; do
 done
 
 echo "--- Submitting Pipeline ---"
-PDF_PATH="data/sample_page_1.pdf"
+PDF_PATH="data/20260125015510 יהודה-26-1128 חומר חקירה מושחר.pdf"
 PDF_FILENAME=$(basename "$PDF_PATH")
 RESPONSE=$(curl -s -X POST \
      "http://localhost:7071/api/pipelines" \

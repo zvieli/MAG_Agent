@@ -428,12 +428,24 @@ class CosmosGremlinManager:
         """
         if partition_key:
             query = (
-                "g.V(id).has('pk', pk).outE().as('edge').inV().as('neighbor').select('edge', 'neighbor')"
+                "g.V(id).has('pk', pk).outE().as('edge').inV().as('neighbor')"
+                ".project('edge_label', 'edge_properties', 'neighbor_id', 'neighbor_label', 'neighbor_type')"
+                ".by(select('edge').label())"
+                ".by(select('edge').valueMap())"
+                ".by(select('neighbor').id())"
+                ".by(coalesce(select('neighbor').values('label'), constant('')))"
+                ".by(coalesce(select('neighbor').values('type'), constant('')))"
             )
             bindings = {"id": node_id, "pk": partition_key}
         else:
             query = (
-                "g.V(id).outE().as('edge').inV().as('neighbor').select('edge', 'neighbor')"
+                "g.V(id).outE().as('edge').inV().as('neighbor')"
+                ".project('edge_label', 'edge_properties', 'neighbor_id', 'neighbor_label', 'neighbor_type')"
+                ".by(select('edge').label())"
+                ".by(select('edge').valueMap())"
+                ".by(select('neighbor').id())"
+                ".by(coalesce(select('neighbor').values('label'), constant('')))"
+                ".by(coalesce(select('neighbor').values('type'), constant('')))"
             )
             bindings = {"id": node_id}
         try:
