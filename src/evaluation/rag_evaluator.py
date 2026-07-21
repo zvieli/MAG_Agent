@@ -108,20 +108,18 @@ class RagEvaluator:
         return summary
 
     async def _generate_answer(self, question: str, chunks: List[str]) -> str:
-        """Simulates LLM answer generation."""
-        # Inject standard citation guidelines to ensure the model references chunks
-        citation_instr = (
-            "\n### CITATION RULES:\n"
-            "Every fact or claim in your final response MUST end with a source citation referencing the exact chunk ID it came from (the identifier following 'CHUNK: ' in the text). "
-            "Use the format: [Your text in Hebrew/English] (Source: [chunk_id]). "
-            "Example: 'החשוד נעצר ב-2026 (Source: 20260125015510______-26-1128__________________1).'\n"
-            "DO NOT shorten or alter the chunk ID to 'chunk_X'. Copy it exactly.\n\n"
-            "### INVESTIGATIVE GRANULARITY RULES:\n"
-            "1. **Differentiate Parallel Frameworks**: Be extremely precise. If a document mentions details for both military/IDF (field context) and police booking (station context), list both or specify which is which (e.g., 'השוטר העוצר בפועל/החוקר בתיק הוא רס\"ם פלג מגידש, וקצין צה\"ל מאשר המעצר בשטח הוא סרן בר כהן').\n"
-            "2. **Differentiate Time Intervals**: Do not confuse incident opening/registration times (e.g., 'זמן תחילת הארוע: 11:21') with interrogation session times (e.g., 'החקירה החלה בשעה 12:40 והסתיימה בשעה 13:31:39'). If asked about investigation times, retrieve the interrogation form start/end times.\n"
-            "3. **Facebook Post Layout**: In standard police reports, the text of a Facebook post is often printed *above* its item metadata (which contains the post date, like '29 בנובמבר 2024'). Carefully associate the text with the date listed in the metadata block directly below it.\n"
+        """Simulates LLM answer generation using unified production prompt configuration."""
+        from src.utils.config_manager import config_manager
+
+        groundedness_instr = await config_manager.get_config(
+            "query_groundedness_instruction.md"
         )
-        prompt = f"Answer the question based ONLY on the provided chunks.{citation_instr}\nChunks: {' '.join(chunks)}\nQuestion: {question}"
+        prompt = (
+            f"Answer the question based ONLY on the provided chunks.\n\n"
+            f"{groundedness_instr}\n\n"
+            f"Chunks: {' '.join(chunks)}\n"
+            f"Question: {question}"
+        )
         response = await self.llm_client.chat.completions.create(
             model=settings.graphify_agent_model,
             messages=[{"role": "user", "content": prompt}],
