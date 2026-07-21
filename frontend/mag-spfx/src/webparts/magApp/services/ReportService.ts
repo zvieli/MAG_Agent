@@ -1,4 +1,4 @@
-import { CommunitySummariesResult, ReportResult } from '../domain/types';
+import { CommunitySummariesResult, ProtocolCompletenessResult, ReportResult } from '../domain/types';
 import { browserCache } from '../domain/browserCache';
 import { IReportService } from './IAppServices';
 import { apiUrl, authHeaders, readJson } from './http';
@@ -48,6 +48,25 @@ export class ReportService implements IReportService {
     const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/communities`), {
       headers: authHeaders(this.functionKey)
     }).then(readJson<CommunitySummariesResult>);
+    await browserCache.set(cacheKey, result, reportTtlMs);
+    return { ...result, cache: { fromCache: false } };
+  }
+
+  public async getProtocolCompleteness(docId: string, options?: { forceRefresh?: boolean }): Promise<ProtocolCompletenessResult> {
+    const cacheKey = `protocol_completeness:${docId}`;
+    if (!options?.forceRefresh) {
+      const cached = await browserCache.get<ProtocolCompletenessResult>(cacheKey);
+      if (cached) {
+        return {
+          ...cached.value,
+          cache: { fromCache: true, cachedAt: new Date(cached.createdAt).toISOString() }
+        };
+      }
+    }
+
+    const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness`), {
+      headers: authHeaders(this.functionKey)
+    }).then(readJson<ProtocolCompletenessResult>);
     await browserCache.set(cacheKey, result, reportTtlMs);
     return { ...result, cache: { fromCache: false } };
   }

@@ -6,13 +6,14 @@ import {
   GraphQuery,
   GraphQueryResult,
   PipelineOperation,
+  ProtocolCompletenessResult,
   ReportResult,
   CommunitySummariesResult,
   TimelineResult
 } from '../domain/types';
 import { createTimelineFromGraph } from '../domain/timeline';
 import { IAppServices, IChatService, IGraphService, IPipelineService, IReportService, ITimelineService } from '../services/IAppServices';
-import { mockCommunitySummaries, mockGraph, mockReport } from './mockData';
+import { mockCommunitySummaries, mockGraph, mockProtocolCompleteness, mockReport } from './mockData';
 
 class MockPipelineService implements IPipelineService {
   public async uploadAndStart(file: File, onProgress?: (operation: PipelineOperation) => void): Promise<PipelineOperation> {
@@ -92,6 +93,10 @@ class MockReportService implements IReportService {
 
   public async getCommunitySummaries(docId: string): Promise<CommunitySummariesResult> {
     return mockCommunitySummaries(docId);
+  }
+
+  public async getProtocolCompleteness(docId: string): Promise<ProtocolCompletenessResult> {
+    return mockProtocolCompleteness(docId);
   }
 }
 

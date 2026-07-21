@@ -2,7 +2,7 @@ import { DefaultButton, Spinner, Pivot, PivotItem } from '@fluentui/react';
 import * as React from 'react';
 import { MarkdownView } from '../components/MarkdownView';
 import styles from '../components/MagApp.module.scss';
-import { CommunitySummariesResult, ReportResult } from '../domain/types';
+import { CommunitySummariesResult, ProtocolCompletenessItem, ProtocolCompletenessResult, ReportResult } from '../domain/types';
 import { IReportService } from '../services/IAppServices';
 import { errorText, sourceLabel } from '../domain/localization';
 
@@ -135,9 +135,67 @@ const sortedCommunityEntries = (communities: CommunitySummariesResult | undefine
     .sort(([a], [b]) => communitySortValue(a) - communitySortValue(b) || a.localeCompare(b));
 };
 
+const statusLabel = (status: string): string => {
+  switch (status) {
+    case 'present':
+      return 'אותר';
+    case 'missing':
+      return 'חסר';
+    case 'conditional_missing':
+      return 'חסר מותנה';
+    case 'not_applicable':
+      return 'לא רלוונטי';
+    default:
+      return 'לא ידוע';
+  }
+};
+
+const statusStyle = (status: string): React.CSSProperties => {
+  if (status === 'present') {
+    return { backgroundColor: '#d9f2e6', color: '#166534', borderColor: '#bbf7d0' };
+  }
+  if (status === 'missing') {
+    return { backgroundColor: '#fde2e2', color: '#991b1b', borderColor: '#fecaca' };
+  }
+  if (status === 'conditional_missing') {
+    return { backgroundColor: '#fff7db', color: '#8a6d3b', borderColor: '#fde68a' };
+  }
+  return { backgroundColor: '#e5eaf0', color: '#334e68', borderColor: '#cbd5e1' };
+};
+
+const evidenceStrengthLabel = (strength?: string): string => {
+  if (strength === 'strong') {
+    return 'ראיה חזקה';
+  }
+  if (strength === 'weak') {
+    return 'אינדיקציה חלקית';
+  }
+  return '';
+};
+
+const evidenceStrengthStyle = (strength?: string): React.CSSProperties => {
+  if (strength === 'strong') {
+    return { backgroundColor: '#ecfdf5', color: '#166534', borderColor: '#bbf7d0' };
+  }
+  if (strength === 'weak') {
+    return { backgroundColor: '#fffbeb', color: '#92400e', borderColor: '#fde68a' };
+  }
+  return { backgroundColor: '#f1f5f9', color: '#475569', borderColor: '#cbd5e1' };
+};
+
+const groupedCompletenessItems = (items: ProtocolCompletenessItem[]): Record<string, ProtocolCompletenessItem[]> => {
+  return items.reduce((acc, item) => {
+    const key = item.pillar || 'general';
+    acc[key] = acc[key] || [];
+    acc[key].push(item);
+    return acc;
+  }, {} as Record<string, ProtocolCompletenessItem[]>);
+};
+
 export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) => {
   const [report, setReport] = React.useState<ReportResult | undefined>();
   const [communities, setCommunities] = React.useState<CommunitySummariesResult | undefined>();
+  const [completeness, setCompleteness] = React.useState<ProtocolCompletenessResult | undefined>();
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | undefined>();
 
@@ -147,11 +205,13 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
     setError(undefined);
     Promise.all([
       reportService.getReport(docId, { forceRefresh }),
-      reportService.getCommunitySummaries(docId, { forceRefresh }).catch(() => undefined)
+      reportService.getCommunitySummaries(docId, { forceRefresh }).catch(() => undefined),
+      reportService.getProtocolCompleteness(docId, { forceRefresh }).catch(() => undefined)
     ])
-      .then(([result, communityResult]) => {
+      .then(([result, communityResult, completenessResult]) => {
         setReport(result);
         setCommunities(communityResult);
+        setCompleteness(completenessResult);
         setLoading(false);
       })
       .catch((reportError) => setError(reportError instanceof Error ? errorText(reportError.message) : 'אירעה שגיאה בטעינת הדו"ח.'))
@@ -168,6 +228,11 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
 
   const parsed = report ? parseReportMarkdown(report.markdown) : null;
   const communityEntries = sortedCommunityEntries(communities);
+  const completenessGroups = groupedCompletenessItems(completeness?.items || []);
+  const completenessSummary = completeness?.summary || {};
+  const criticalMissing = completenessSummary.criticalMissing || 0;
+  const criticalReviewRequired = completenessSummary.criticalReviewRequired || 0;
+  const conditionalMissing = completenessSummary.conditionalMissing || 0;
 
   return (
     <section className={styles.panel}>
@@ -182,6 +247,15 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
       <div className={styles.reportOpinion} style={{ marginBottom: '16px', fontSize: '14px', color: '#52606d' }}>
         ממשק אינטראקטיבי המנגיש את תובנות גרף הידע מתוך התיק לשימוש בהליכים משפטיים וחקירות נגדיות.
       </div>
+      {completeness && (criticalMissing > 0 || criticalReviewRequired > 0 || conditionalMissing > 0) && (
+        <div className={styles.reportOpinion} style={{
+          borderRightColor: criticalMissing > 0 ? '#a80000' : '#f0b429',
+          backgroundColor: criticalMissing > 0 ? '#fff5f5' : '#fffaf0',
+          color: criticalMissing > 0 ? '#7f1d1d' : '#4a5568'
+        }}>
+          בקרת שלמות תיק: {criticalMissing} חוסרים קריטיים, {criticalReviewRequired} בדיקות קריטיות נדרשות ו-{conditionalMissing} פריטים מותנים לא אותרו בחומר שהועלה.
+        </div>
+      )}
       {loading && <Spinner label={'טוען דו"ח'} />}
       {error && <div className={styles.errorBox}>{error}</div>}
       
@@ -326,6 +400,110 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
                     );
                   })}
                 </div>
+              )}
+            </div>
+          </PivotItem>
+
+          <PivotItem headerText="בקרת שלמות תיק">
+            <div style={{ marginTop: '16px' }}>
+              {!completeness ? (
+                <div className={styles.emptyState} style={{ padding: '24px' }}>לא נמצא דו"ח בקרת שלמות עבור התיק.</div>
+              ) : (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', marginBottom: '14px' }}>
+                    <div className={styles.graphMetric}>
+                      <span>כיסוי</span>
+                      <strong>{completenessSummary.coveragePercent || 0}%</strong>
+                    </div>
+                    <div className={styles.graphMetric}>
+                      <span>אותרו</span>
+                      <strong>{completenessSummary.present || 0}</strong>
+                    </div>
+                    <div className={styles.graphMetric}>
+                      <span>חסרים</span>
+                      <strong>{completenessSummary.missing || 0}</strong>
+                    </div>
+                    <div className={styles.graphMetric}>
+                      <span>בדיקות קריטיות</span>
+                      <strong>{completenessSummary.criticalReviewRequired || 0}</strong>
+                    </div>
+                    <div className={styles.graphMetric}>
+                      <span>מותנים</span>
+                      <strong>{completenessSummary.conditionalMissing || 0}</strong>
+                    </div>
+                  </div>
+                  {completeness.disclaimer && (
+                    <div className={styles.reportOpinion} style={{ marginBottom: '14px' }}>
+                      {completeness.disclaimer}
+                    </div>
+                  )}
+                  {Object.keys(completenessGroups).map((pillar) => (
+                    <section key={pillar} style={{ marginTop: '18px' }}>
+                      <h3 style={{ margin: '0 0 10px', fontSize: '17px', color: '#172033' }}>{pillar}</h3>
+                      <div className={styles.actorCardGrid} style={{ marginTop: 0 }}>
+                        {completenessGroups[pillar].map((item) => (
+                          <div key={item.id} className={styles.actorCard}>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', gap: '10px', alignItems: 'flex-start', marginBottom: '10px' }}>
+                              <h4 style={{ margin: 0, fontSize: '15px', color: '#172033' }}>{item.label}</h4>
+                              <span style={{
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                minHeight: '24px',
+                                padding: '0 8px',
+                                border: '1px solid',
+                                borderRadius: '999px',
+                                fontSize: '12px',
+                                fontWeight: 650,
+                                whiteSpace: 'nowrap',
+                                ...statusStyle(item.status)
+                              }}>
+                                {statusLabel(item.status)}
+                              </span>
+                            </div>
+                            {evidenceStrengthLabel(item.evidenceStrength) && (
+                              <div style={{ marginBottom: '8px' }}>
+                                <span style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  minHeight: '22px',
+                                  padding: '0 7px',
+                                  border: '1px solid',
+                                  borderRadius: '999px',
+                                  fontSize: '11px',
+                                  fontWeight: 650,
+                                  ...evidenceStrengthStyle(item.evidenceStrength)
+                                }}>
+                                  {evidenceStrengthLabel(item.evidenceStrength)}
+                                </span>
+                              </div>
+                            )}
+                            <div style={{ color: '#52606d', fontSize: '13px', lineHeight: 1.45, marginBottom: '8px' }}>
+                              {item.description}
+                            </div>
+                            <div style={{ color: '#334e68', fontSize: '13px', lineHeight: 1.45 }}>
+                              {item.reason}
+                            </div>
+                            {item.applicabilityEvidence?.snippet && item.status !== 'present' && (
+                              <div style={{ marginTop: '8px', color: '#475569', fontSize: '12px', lineHeight: 1.45 }}>
+                                <strong>למה נבדק: </strong>{item.applicabilityEvidence.snippet}
+                              </div>
+                            )}
+                            {item.reviewNote && (
+                              <div style={{ marginTop: '8px', color: '#92400e', fontSize: '12px', lineHeight: 1.45 }}>
+                                {item.reviewNote}
+                              </div>
+                            )}
+                            {item.evidence?.[0] && (
+                              <div style={{ marginTop: '10px', padding: '8px', borderRight: '3px solid #0f766e', backgroundColor: '#f0fdfa', color: '#134e4a', fontSize: '12px', lineHeight: 1.45 }}>
+                                <strong>{item.evidence[0].signal}: </strong>{item.evidence[0].snippet}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </>
               )}
             </div>
           </PivotItem>

@@ -3,6 +3,11 @@ import json
 from unittest.mock import MagicMock, patch, AsyncMock
 from src.processing import orchestration_activities as activities
 
+
+async def immediate_to_thread(func, *args, **kwargs):
+    return func(*args, **kwargs)
+
+
 @pytest.mark.asyncio
 async def test_activity_extract_chunk_in_memory():
     # Setup
@@ -56,6 +61,7 @@ async def test_activity_merge_partials_saves_to_storage():
     mock_resolver_instance.resolve.return_value = ([], [], "report")
     
     with patch("src.processing.orchestration_activities._get_artifact_store", return_value=mock_store), \
+         patch("src.processing.orchestration_activities.asyncio.to_thread", new=immediate_to_thread), \
          patch("src.processing.orchestration_activities.DefaultEntityResolver", return_value=mock_resolver_instance):
         
         # Act
@@ -74,8 +80,11 @@ async def test_activity_final_indexing_cleans_up_merged_path():
     mock_store = MagicMock()
     mock_store.read_bytes.return_value = json.dumps({
         "metadata": {"doc_id": "test_doc"},
-        "nodes": [],
-        "edges": []
+        "nodes": [
+            {"id": "a", "label": "א", "description": "תיאור א"},
+            {"id": "b", "label": "ב", "description": "תיאור ב"},
+        ],
+        "edges": [{"source": "a", "target": "b", "relation": "RELATED_TO"}]
     }).encode("utf-8")
     mock_store.exists.return_value = False
     
@@ -84,11 +93,16 @@ async def test_activity_final_indexing_cleans_up_merged_path():
     mock_cosmos_mgr = MagicMock()
     mock_cosmos_mgr.sync_graph = AsyncMock()
     
-    mock_reporter = AsyncMock()
+    mock_reporter = MagicMock()
+    mock_reporter.generate = AsyncMock()
+
     with patch("src.processing.orchestration_activities._get_artifact_store", return_value=mock_store), \
          patch("src.processing.orchestration_activities.get_cosmos_manager", return_value=mock_cosmos_mgr), \
+         patch("src.processing.orchestration_activities.asyncio.to_thread", new=immediate_to_thread), \
          patch("src.processing.orchestration_activities._index_nodes", new_callable=AsyncMock), \
          patch("src.processing.orchestration_activities._index_edge_labels", new_callable=AsyncMock), \
+         patch("src.processing.orchestration_activities.AzureBlobStorage", return_value=MagicMock()), \
+         patch("src.processing.orchestration_activities.PersistenceManager", return_value=MagicMock()), \
          patch("src.processing.orchestration_activities.DefaultReporter", return_value=mock_reporter):
         
         # Act

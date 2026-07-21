@@ -254,6 +254,7 @@ class DefaultReporter:
         graph_data: Dict[str, Any],
         pages: List[Dict[str, Any]],
         source_file: str,
+        protocol_completeness: Dict[str, Any] | None = None,
     ):
         """
         Generate all investigative reports for a processed document.
@@ -302,6 +303,15 @@ class DefaultReporter:
                 s_tgt = s.get("target") or s.get("target_label") or "Unknown"
                 s_score = s.get("_score") or s.get("score") or 0.0
                 insight_md += f"- {s_src} <-> {s_tgt} (Score: {s_score:.2f})\n"
+
+            if protocol_completeness:
+                from src.reporting.protocol_completeness import (
+                    protocol_completeness_to_markdown,
+                )
+
+                insight_md += "\n\n"
+                insight_md += protocol_completeness_to_markdown(protocol_completeness)
+                insight_md += "\n"
 
             return md_report + insight_md
 

@@ -175,6 +175,7 @@ class Settings(BaseSettings):
             "community_summary_system": "community_summary_system.md",
             "community_summary_user": "community_summary_user.md",
             "agent_system_prompt": "agent_system_prompt.md",
+            "protocol_completeness_system": "protocol_completeness_system.md",
         }
 
         filename = prompt_mapping.get(attr_name)

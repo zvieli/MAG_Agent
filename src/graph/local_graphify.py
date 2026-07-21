@@ -50,6 +50,8 @@ def cluster(G: nx.Graph) -> tuple[dict[str, list[str]], dict[str, str]]:
 
     communities_dict: dict[str, list[str]] = {}
     hierarchy_dict: dict[str, str] = {}
+    if G.number_of_nodes() == 0:
+        return communities_dict, hierarchy_dict
 
     def partition(subgraph_nodes: list[str], parent_id: str | None = None, depth: int = 0):
         sub_g = G.subgraph(subgraph_nodes)

@@ -12,6 +12,7 @@ class GraphAnalysisConfig(BaseModel):
         god_node_threshold: Degree threshold above which a node is considered a 'God Node' (hub).
         max_hops_default: Default search depth for graph traversals.
         min_community_size: Minimum number of nodes required to form a distinct community.
+        enable_llm_community_summaries: Whether to call the LLM for community text summaries.
         llm_summary_min_size: Minimum node count to trigger an LLM-generated community summary.
         chunk_overlap_sentences: Number of sentences to overlap between text chunks for connectivity.
         community_label_stopwords: List of common words to ignore when generating community labels.
@@ -20,6 +21,7 @@ class GraphAnalysisConfig(BaseModel):
     god_node_threshold: int = 50
     max_hops_default: int = 3
     min_community_size: int = 3
+    enable_llm_community_summaries: bool = False
     llm_summary_min_size: int = 10
     chunk_overlap_sentences: int = 3
     community_label_stopwords: List[str] = Field(
@@ -220,6 +222,7 @@ class SchemaConfigModel(BaseModel):
     timeline_narrative: TimelineNarrativeConfig = Field(
         default_factory=TimelineNarrativeConfig
     )
+    protocol_completeness: Dict[str, Any] = Field(default_factory=dict)
     ontology_engine: Dict[str, Any] = Field(default_factory=dict)
     relations: Optional[Dict[str, Any]] = Field(default=None)
 

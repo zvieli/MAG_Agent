@@ -150,6 +150,70 @@ export interface CommunitySummariesResult {
   error?: string;
 }
 
+export type ProtocolCompletenessStatus =
+  | 'present'
+  | 'missing'
+  | 'conditional_missing'
+  | 'not_applicable'
+  | 'unknown';
+
+export interface ProtocolCompletenessEvidence {
+  source: string;
+  signal: string;
+  snippet: string;
+  strength?: 'strong' | 'weak' | 'none' | string;
+  matchType?: 'regex' | 'keyword' | string;
+  pattern?: string;
+}
+
+export interface ProtocolCompletenessApplicabilityEvidence {
+  source: string;
+  signal: string;
+  snippet: string;
+  matchType?: 'regex' | 'keyword' | string;
+  pattern?: string;
+}
+
+export interface ProtocolCompletenessItem {
+  id: string;
+  pillar: string;
+  label: string;
+  description: string;
+  severity: 'critical' | 'warning' | 'info' | string;
+  status: ProtocolCompletenessStatus;
+  reason: string;
+  applicability: string;
+  applicabilityEvidence?: ProtocolCompletenessApplicabilityEvidence;
+  evidenceStrength?: 'strong' | 'weak' | 'none' | string;
+  reviewNote?: string;
+  evidence: ProtocolCompletenessEvidence[];
+  sourceRefs: Array<Record<string, string | number | undefined>>;
+}
+
+export interface ProtocolCompletenessResult {
+  docId: string;
+  protocolVersion?: string;
+  generatedAt?: string;
+  updatedAt?: string;
+  source: 'blob' | 'mock' | 'backfill';
+  disclaimer?: string;
+  summary: {
+    totalItems?: number;
+    applicableItems?: number;
+    present?: number;
+    missing?: number;
+    conditionalMissing?: number;
+    notApplicable?: number;
+    unknown?: number;
+    criticalMissing?: number;
+    criticalReviewRequired?: number;
+    coveragePercent?: number;
+  };
+  items: ProtocolCompletenessItem[];
+  cache?: CacheMetadata;
+  error?: string;
+}
+
 export interface TimelineEvent {
   id: string;
   title: string;

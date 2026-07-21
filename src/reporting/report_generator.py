@@ -254,8 +254,29 @@ def _community_context_edges(
     return [row for _, row in edge_rows[:limit]]
 
 
-async def summarize_communities(G, communities, community_labels):
+def fallback_community_summaries(G, communities, community_labels):
+    """Create deterministic community summaries without LLM calls."""
+    summaries: dict[str, str] = {}
+    for community_id, members in communities.items():
+        member_list = list(members)
+        if not member_list:
+            label = f"קהילה {community_id}"
+        else:
+            degrees = dict(G.degree(member_list))
+            top_node_id = max(degrees, key=degrees.get) if degrees else member_list[0]
+            label = G.nodes[top_node_id].get("label", top_node_id)
+        community_labels[str(community_id)] = str(label)
+        summaries[str(community_id)] = f"קהילה מצומצמת המרוכזת סביב {label}."
+    return summaries
+
+
+async def summarize_communities(G, communities, community_labels, *, enable_llm: bool | None = None):
     from src.graph.local_graphify import god_nodes
+
+    if enable_llm is None:
+        enable_llm = SCHEMA_CONFIG.graph_analysis.enable_llm_community_summaries
+    if not enable_llm:
+        return fallback_community_summaries(G, communities, community_labels)
 
     summaries: dict[str, str] = {}
     seen_titles = Counter()
@@ -358,7 +379,7 @@ async def summarize_communities(G, communities, community_labels):
             seen_titles[title] += 1
             if seen_titles[title] > 1:
                 title = f"{title} ({seen_titles[title]})"
-        community_labels[cid] = title
+        community_labels[str(cid)] = title
         summaries[str(cid)] = summary
     return summaries
 
@@ -482,6 +503,9 @@ def analyze_graph_health(graph: nx.Graph) -> dict[str, Any]:
     semantic_score = description_coverage * 100.0
     confidence_score = (0.7 * (1.0 - ambiguous_ratio) + 0.3 * extracted_ratio) * 100.0
     community_score = community_summary_coverage * 100.0
+    community_summary_scoring_enabled = bool(
+        graph.graph.get("llm_community_summaries_enabled", True)
+    )
     integrity_penalty = (
         len(temporal_anomalies) * 10
         + len(broken_citations) * 5
@@ -537,19 +561,22 @@ def analyze_graph_health(graph: nx.Graph) -> dict[str, Any]:
     if identity_collapse_detected:
         final_score = 0
     else:
+        integrity_score = 100.0 - min(100, integrity_penalty + god_node_split_penalty)
+        base_score = (
+            0.3 * connectivity_score
+            + 0.2 * semantic_score
+            + 0.15 * confidence_score
+            + 0.2 * integrity_score
+        )
+        if community_summary_scoring_enabled:
+            weighted_score = base_score + 0.15 * community_score
+        else:
+            weighted_score = base_score / 0.85
         final_score = max(
             1,
             min(
                 100,
-                round(
-                    0.3 * connectivity_score
-                    + 0.2 * semantic_score
-                    + 0.15 * confidence_score
-                    + 0.15 * community_score
-                    + 0.2
-                    * (100.0 - min(100, integrity_penalty + god_node_split_penalty))
-                    + depth_bonus
-                ),
+                round(weighted_score + depth_bonus),
             ),
         )
     return {
@@ -591,6 +618,7 @@ def analyze_graph_health(graph: nx.Graph) -> dict[str, Any]:
         },
         "communities": community_breakdown,
         "cohesion": {"average_cohesion": average_cohesion, "scores": cohesion_scores},
+        "community_summary_scoring_enabled": community_summary_scoring_enabled,
         "final_quality_score": final_score,
     }
 

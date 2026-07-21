@@ -7,6 +7,7 @@ import {
   GraphQueryResult,
   PipelineOperation,
   PipelineOutput,
+  ProtocolCompletenessResult,
   ReportResult,
   TimelineResult
 } from '../domain/types';
@@ -24,6 +25,7 @@ export interface IGraphService {
 export interface IReportService {
   getReport(docId: string, options?: { forceRefresh?: boolean }): Promise<ReportResult>;
   getCommunitySummaries(docId: string, options?: { forceRefresh?: boolean }): Promise<CommunitySummariesResult>;
+  getProtocolCompleteness(docId: string, options?: { forceRefresh?: boolean }): Promise<ProtocolCompletenessResult>;
 }
 
 export interface ITimelineService {

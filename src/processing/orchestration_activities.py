@@ -23,7 +23,11 @@ from src.models.models import RawGraphExtraction, SCHEMA_CONFIG
 from src.storage.search_manager import SearchManager
 from src.processing.strategies import DefaultEntityResolver, DefaultReporter
 from src.graph.local_graphify import build_from_json, cluster
-from src.reporting.report_generator import summarize_communities
+from src.reporting.report_generator import (
+    fallback_community_summaries,
+    summarize_communities,
+)
+from src.reporting.protocol_completeness import analyze_protocol_completeness
 from src.processing.persistence_manager import PersistenceManager
 from src.storage.blob_storage import AzureBlobStorage
 
@@ -70,6 +74,37 @@ def _final_graph_path(doc_id: str) -> str:
 
 def _extracted_text_path(doc_id: str) -> str:
     return f"extracted_text/{doc_id}.md"
+
+
+async def _build_community_summary_payload(
+    G: Any,
+    communities: Dict[str, List[str]],
+    hierarchy: Dict[str, str],
+) -> tuple[dict[str, str], dict[str, str], dict[str, Any], bool]:
+    enable_llm_summaries = bool(
+        SCHEMA_CONFIG.graph_analysis.enable_llm_community_summaries
+    )
+    community_labels: dict[str, str] = {}
+    if enable_llm_summaries:
+        summaries = await summarize_communities(
+            G,
+            communities,
+            community_labels,
+            enable_llm=True,
+        )
+    else:
+        logging.info(
+            "[ACTIVITY][FINAL_INDEXING] LLM community summaries disabled; using deterministic fallbacks."
+        )
+        summaries = fallback_community_summaries(G, communities, community_labels)
+
+    payload = {
+        "summaries": summaries,
+        "hierarchy": hierarchy,
+        "llmEnabled": enable_llm_summaries,
+        "summaryMode": "llm" if enable_llm_summaries else "fallback",
+    }
+    return summaries, community_labels, payload, enable_llm_summaries
 
 
 class _ArtifactPersistence:
@@ -479,14 +514,17 @@ async def activity_final_indexing(merged_graph_path: str) -> str:
                 G = build_from_json(graph_data)
                 communities, hierarchy = await asyncio.to_thread(cluster, G)
 
-            community_labels = {}
-            summaries = await summarize_communities(G, communities, community_labels)
+            (
+                summaries,
+                community_labels,
+                payload,
+                enable_llm_summaries,
+            ) = await _build_community_summary_payload(G, communities, hierarchy)
+            G.graph["communities"] = communities
+            G.graph["community_summaries"] = summaries
+            G.graph["llm_community_summaries_enabled"] = enable_llm_summaries
             
             # Save summaries and hierarchy mapping
-            payload = {
-                "summaries": summaries,
-                "hierarchy": hierarchy
-            }
             summaries_json = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
             await asyncio.to_thread(store.write_bytes, f"graph/{doc_id}/community_summaries.json", summaries_json)
             await asyncio.to_thread(store.write_bytes, "graph/latest/community_summaries.json", summaries_json)
@@ -503,6 +541,30 @@ async def activity_final_indexing(merged_graph_path: str) -> str:
                 logging.warning(f"Could not load extracted text for word count: {e}")
 
             pages = [{"text": raw_text}]
+            protocol_report = analyze_protocol_completeness(
+                schema_config=SCHEMA_CONFIG,
+                graph_data=graph_data,
+                raw_text=raw_text,
+                doc_id=doc_id,
+            )
+            protocol_json = json.dumps(
+                protocol_report, ensure_ascii=False, indent=2
+            ).encode("utf-8")
+            await asyncio.to_thread(
+                store.write_bytes,
+                f"graph/{doc_id}/protocol_completeness.json",
+                protocol_json,
+            )
+            await asyncio.to_thread(
+                store.write_bytes,
+                "graph/latest/protocol_completeness.json",
+                protocol_json,
+            )
+            await asyncio.to_thread(
+                store.write_bytes,
+                "protocol_completeness.json",
+                protocol_json,
+            )
 
             conn_str = settings.azure_storage_connection_string or "UseDevelopmentStorage=true"
             container_name = settings.azure_storage_container or "graphify-out"
@@ -511,12 +573,26 @@ async def activity_final_indexing(merged_graph_path: str) -> str:
             # Generate report to root of container
             persistence_root = PersistenceManager(blob_storage, base_blob_path="")
             reporter_root = DefaultReporter(persistence_root)
-            await reporter_root.generate(G, communities, graph_data, pages, doc_id)
+            await reporter_root.generate(
+                G,
+                communities,
+                graph_data,
+                pages,
+                doc_id,
+                protocol_completeness=protocol_report,
+            )
 
             # Copy report & HTML to doc_id folder for historical tracking
             persistence_nested = PersistenceManager(blob_storage, base_blob_path=f"graph/{doc_id}")
             reporter_nested = DefaultReporter(persistence_nested)
-            await reporter_nested.generate(G, communities, graph_data, pages, doc_id)
+            await reporter_nested.generate(
+                G,
+                communities,
+                graph_data,
+                pages,
+                doc_id,
+                protocol_completeness=protocol_report,
+            )
             
             logging.info("[ACTIVITY][FINAL_INDEXING] Successfully generated community summaries and markdown report.")
         except Exception as e:

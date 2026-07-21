@@ -635,6 +635,52 @@ def get_case_communities(req: func.HttpRequest) -> func.HttpResponse:
     )
 
 
+@app.route(route="cases/{docId}/completeness", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+def get_case_completeness(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Returns protocol completeness analysis generated during activity_final_indexing.
+    """
+    doc_id = req.route_params.get("docId")
+    if not doc_id:
+        return func.HttpResponse("Missing route parameter: docId", status_code=400)
+
+    store = get_artifact_store()
+    candidates = [
+        f"graph/{doc_id}/protocol_completeness.json",
+        "protocol_completeness.json",
+    ]
+
+    for path in candidates:
+        try:
+            if store.exists(path):
+                payload = json.loads(store.read_bytes(path).decode("utf-8"))
+                if not isinstance(payload, dict):
+                    payload = {}
+                payload.setdefault("docId", doc_id)
+                payload.setdefault("source", "blob")
+                payload.setdefault("updatedAt", datetime.utcnow().isoformat() + "Z")
+                return _json_response(payload)
+        except Exception as exc:
+            logging.warning(
+                "[HTTP][CASE_COMPLETENESS] Failed reading candidate path=%s doc_id=%s: %s",
+                path,
+                doc_id,
+                exc,
+            )
+
+    return _json_response(
+        {
+            "docId": doc_id,
+            "source": "blob",
+            "updatedAt": datetime.utcnow().isoformat() + "Z",
+            "summary": {},
+            "items": [],
+            "error": "protocol_completeness.json not found for case.",
+        },
+        status_code=404,
+    )
+
+
 @app.route(route="pipelines", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 @app.durable_client_input(client_name="client")
 async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
