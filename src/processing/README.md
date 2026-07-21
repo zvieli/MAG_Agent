@@ -1,77 +1,62 @@
-# Investigative Processing & Orchestration Module (`src/processing/`)
+# Processing Module
 
-This module serves as the orchestrator of the ingestion pipeline. It coordinates the parsing, chunking, embedding generation, semantic indexing, and parallel graph building operations.
+`src/processing/` contains the ingestion pipeline activities and cloud retrieval/indexing adapters used by the Function App.
 
----
+The Durable orchestrator itself is defined in `function_app.py`; the activity implementations live here.
 
-## 🌌 Orchestration Architecture (Map-Reduce & Durable Functions)
+## Responsibilities
 
-The processing pipeline is orchestrated via **Azure Durable Functions (Python V2 model)** inside `function_app.py`, calling activities implemented in `orchestration_activities.py`.
+- Parse PDFs with Azure AI Document Intelligence.
+- Normalize Hebrew/right-to-left text and split documents into chunks.
+- Generate embeddings and index chunks in Azure AI Search.
+- Run chunk-level graph extraction.
+- Merge partial graph outputs and run entity resolution.
+- Generate final graph/report/protocol-completeness artifacts.
+- Sync graph records to Cosmos DB Gremlin.
+- Provide cloud-backed graph/source retrieval for the query agent.
+
+## Current Components
+
+- `document_processor.py`: PDF/Markdown parsing, DI integration, Hebrew cleanup, chunk generation.
+- `orchestration_activities.py`: Durable activity implementations and pipeline observability events.
+- `vector_indexer.py`: embedding generation and Azure AI Search indexing.
+- `cloud_knowledge_provider.py`: Cosmos/Search-backed retrieval methods for the query agent.
+- `persistence_manager.py`: artifact persistence coordination.
+- `strategies.py`: strategy wrappers used by pipeline orchestration.
+
+## Pipeline Flow
 
 ```mermaid
 sequenceDiagram
-    participant Trigger as Trigger (HTTP / Blob Queue)
-    participant Orch as pipeline_orchestrator
-    participant Act as Activities (orchestration_activities.py)
+    participant HTTP as POST /api/pipelines
+    participant O as pipeline_orchestrator
+    participant A as orchestration_activities.py
+    participant S as Blob/Azurite
     participant Search as Azure AI Search
-    participant Cosmos as Cosmos DB
-    participant Blob as Azure Blob Storage
+    participant C as Cosmos Gremlin
 
-    Trigger->>Orch: Start Orchestration (blob_path)
-    Orch->>Act: activity_preflight_check
-    Act-->>Orch: Success
-    Orch->>Act: activity_chunking
-    Act->>Blob: Read PDF & Run Document Intelligence
-    Act->>Blob: Write Unified Markdown & Chunks
-    Act->>Search: Index Chunk Embeddings (graphify-chunks)
-    Act-->>Orch: List of chunk artifact paths
-    Note over Orch, Act: Fan-Out / Parallel Extraction
-    loop For each chunk (in batches)
-        Orch->>Act: activity_extract_chunk(chunk_path)
-        Act->>Blob: Load chunk, call LLM (gpt-4o)
-        Act->>Blob: Save extraction result & clean source chunk
-        Act-->>Orch: Extraction artifact path
-    end
-    Note over Orch, Act: Fan-In / Graph Merge
-    Orch->>Act: activity_merge_partials(extraction_paths)
-    Act->>Act: Run Entity Resolver
-    Act->>Blob: Save partial merged graph & delete extraction paths
-    Act-->>Orch: Merged graph path
-    Orch->>Act: activity_final_indexing(merged_graph_path)
-    Act->>Cosmos: Sync Graph (Nodes & Edges) with Partition Isolation
-    Act->>Act: NetworkX Community detection & summaries
-    Act->>Blob: Save final.json, summaries, and Markdown reports
-    Act->>Blob: Clean up partial merged graph
-    Act-->>Orch: Cosmos URI
+    HTTP->>S: write uploaded PDF
+    HTTP->>O: start with blob_path, doc_id, trace_id
+    O->>A: activity_preflight_check
+    O->>A: activity_chunking
+    A->>S: write raw text and chunks
+    A->>Search: index chunk embeddings
+    O->>A: activity_extract_chunk per chunk
+    A->>S: write partial extraction artifacts
+    O->>A: activity_merge_partials
+    A->>S: write merged graph artifact
+    O->>A: activity_final_indexing
+    A->>C: sync final graph
+    A->>S: write reports and protocol completeness
 ```
 
----
+## Observability
 
-## ⚙️ Core Pipeline Components
+Activities emit structured `[OBS]` logs and metrics for phase completion, failures, durations, protocol completeness, and LLM cost-control decisions. The trace ID is passed from the HTTP request into Durable input and custom status.
 
-### 1. Ingestion & Document Processing (`document_processor.py`)
-- Ingests PDFs and Markdown files.
-- Uses **Azure AI Document Intelligence** (`_load_document_pages_via_di`) for high-fidelity OCR, layout awareness, and text extraction.
-- Detects and resolves **visual Hebrew (reversed layout)** anomalies to guarantee readable Hebrew chunks.
-- Employs sentence-aware sliding window chunking to split files into clean text fragments.
+## Maintainer Notes
 
-### 2. Orchestration Activities (`orchestration_activities.py`)
-Implements Durable Functions activities:
-- **Preflight Check**: Verifies active connections to Azure Storage, Cosmos DB, and Azure Search.
-- **Chunking**: Executes document parsing, generates sentence-based overlaps, indexes chunk text and vector embeddings in Azure Search, and uploads text chunks to Blob storage.
-- **Chunk Extraction**: Triggers parallel extraction on each chunk using LLM strategies.
-- **Merge Partials**: Runs entity resolution to unify nodes and edges.
-- **Final Indexing**: Synces graph data to Cosmos DB, runs community summary algorithms, and generates report artifacts.
-
-### 3. Semantic Vector Indexing (`vector_indexer.py`)
-- Interfaces with Azure OpenAI to generate vector embeddings (using models like `text-embedding-3-small` or `text-embedding-ada-002`).
-- Embeds chunk texts and indexes them in Azure AI Search.
-- Note: Node/Edge vector search is disabled by design. Instead, semantic discovery is targeted purely at text chunks while graph logic is navigated via Cosmos Gremlin.
-
-### 4. Cloud Knowledge Provider (`cloud_knowledge_provider.py`)
-- Implements `KnowledgeProvider`.
-- Exposes clean retrieval methods combining Azure AI Search and Cosmos DB.
-- Enforces strict isolation: every query must pass a `doc_id` context as the partition key.
-
-### 5. Dependency Verification (`dependency_checker.py` in `src/operations/`)
-- Checks connectivity and operational status for Azure OpenAI, Cosmos DB Gremlin, Storage Account, Azure AI Search, and Document Intelligence.
+- Activity inputs/outputs should remain JSON-serializable.
+- Keep artifact paths explicit; Durable history should not contain large payloads.
+- Keep cleanup scoped to generated intermediate artifacts only.
+- Preserve `doc_id`/`trace_id` through every activity boundary.

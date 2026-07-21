@@ -15,7 +15,12 @@ from src.processing.cloud_knowledge_provider import CloudKnowledgeProvider
 from src.storage.search_manager import SearchManager
 from src.graph.cosmos_manager import CosmosGremlinManager
 
-from src.query_agent.state import InvestigationState
+from src.query_agent.state import (
+    InvestigationState,
+    UserMessage,
+    from_external_query_state,
+    to_external_query_state,
+)
 from src.query_agent.nodes import get_investigative_graph
 
 logger = logging.getLogger(__name__)
@@ -266,7 +271,7 @@ class QueryAgent:
         For automated non-interactive testing, automatically approves all proposed facts.
         """
         state = InvestigationState(doc_id=self.doc_id)
-        state.messages.append({"role": "user", "content": question})
+        state.messages.append(UserMessage(content=question))
         
         graph = get_investigative_graph()
         
@@ -287,7 +292,12 @@ class QueryAgent:
                 
         return "Error: Maximum execution turns reached without final response."
 
-    async def answer_question_stateless(self, question: str, state_dict: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    async def answer_question_stateless(
+        self,
+        question: str,
+        state_dict: Optional[Dict[str, Any]] = None,
+        trace_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Runs a single turn of the LangGraph state machine.
         Returns the updated InvestigationState dict.
@@ -296,14 +306,22 @@ class QueryAgent:
         graph = get_investigative_graph()
         
         if state_dict:
-            state = InvestigationState(**state_dict)
+            state = from_external_query_state(state_dict)
         else:
             state = InvestigationState(doc_id=self.doc_id)
-            state.messages.append({"role": "user", "content": question})
+            state.messages.append(UserMessage(content=question))
             
         current_state_dict = state.model_dump()
-        result = await graph.ainvoke(current_state_dict)
-        return result
+        result = await graph.ainvoke(
+            current_state_dict,
+            config={
+                "metadata": {
+                    "trace_id": trace_id,
+                    "doc_id": self.doc_id,
+                }
+            },
+        )
+        return to_external_query_state(result)
 
 
 async def run_chat_loop():
@@ -318,7 +336,6 @@ async def run_chat_loop():
     except Exception:
         pass
 
-    agent = QueryAgent(doc_id=doc_id)
     graph = get_investigative_graph()
     
     print(fix_text(f"Investigative Query Agent Ready. Partition context: '{doc_id}'"))
@@ -335,7 +352,7 @@ async def run_chat_loop():
             continue
             
         state = InvestigationState(doc_id=doc_id)
-        state.messages.append({"role": "user", "content": q})
+        state.messages.append(UserMessage(content=q))
         
         while True:
             state_dict = state.model_dump()

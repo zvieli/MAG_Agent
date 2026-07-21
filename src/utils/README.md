@@ -1,27 +1,34 @@
-# Utilities Module (`src/utils/`)
+# Utilities Module
 
-This module provides reusable helper functions, configuration engines, text manipulation systems, and JSON parsing helpers utilized throughout the GraphRAG pipelines and reasoning services.
+`src/utils/` contains cross-cutting helpers used by ingestion, reporting, querying, and operations.
 
----
+## Current Components
 
-## ⚙️ Core Utilities
+- `config.py`: Pydantic settings for Azure OpenAI, Azure Search, Cosmos DB, Storage, Document Intelligence, and runtime flags.
+- `config_manager.py`: schema/config loading helpers.
+- `json_repair.py`: defensive JSON repair for malformed or truncated LLM output.
+- `model_helpers.py`: normalization helpers used by Pydantic models and extraction post-processing.
+- `bidi_utils.py`: Hebrew/right-to-left text utilities for readable output.
+- `observability.py`: structured `[OBS]` event/metric logging, trace ID extraction, secret redaction, and field truncation.
 
-### 1. Configuration Engine (`config.py`)
-- Employs **Pydantic Settings** to validate and load operational settings at runtime.
-- Automatically handles dynamic resolution of LLM prompt templates stored in the root `/prompts` folder.
-- Resolves schema properties and merges settings loaded via local `.env` overrides or cloud environment settings.
+## Observability Helpers
 
-### 2. Forensic JSON Repair (`json_repair.py`)
-LLM structural predictions can occasionally arrive truncated or malformed. To prevent ingestion crashes:
-- **Bracket Balancing**: Iteratively computes missing braces and arrays to close truncated JSON strings.
-- **Key Normalization**: Merges hallucinated property keys and resolves nested dictionaries into single flat schemas.
-- **Safe ID Conversions**: Automatically translates Hebrew node labels into safe, ASCII-compatible snake_case strings while keeping the original string mapping as attributes (ensuring smooth Cosmos DB ingestion).
+Use `log_event` for structured operational events:
 
-### 3. Bidirectional Text Renderer (`bidi_utils.py`)
-- Standardizes terminal outputs for right-to-left languages.
-- Implements visual reshaping and correct sequencing of mixed Hebrew and English character streams to prevent scrambled terminal logs.
+```python
+log_event("query.completed", trace_id=trace_id, doc_id=doc_id, duration_ms=elapsed_ms)
+```
 
-### 4. Model Helpers (`model_helpers.py`)
-- Standardizes data types prior to loading in Pydantic nodes/edges.
-- Normalizes textual confidence score definitions (e.g. mapping various synonyms like `שכיח` or `עקיף` to standard categories).
-- Implements validation logic that drops low-probability relationships based on minimum threshold settings.
+Use `log_metric` for count or latency measurements:
+
+```python
+log_metric("query_duration_ms", elapsed_ms, unit="ms", doc_id=doc_id)
+```
+
+Trace IDs should be read from `x-mag-trace-id` with `trace_id_from_request`. Values are normalized and generated with a prefix when absent.
+
+## Maintainer Notes
+
+- Do not log secrets, keys, tokens, SAS URLs, or full connection strings.
+- Keep helper behavior deterministic; this package is used in tests and Durable activities.
+- Prefer adding shared parsing/normalization here only when it is reused across modules.

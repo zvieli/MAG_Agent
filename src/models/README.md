@@ -1,65 +1,39 @@
-# Models Module (`src/models/`)
+# Models Module
 
-This module defines the foundational Data Transfer Objects (DTOs) and configuration models used across the ingestion pipeline and query reasoning engine, leveraging **Pydantic V2** to enforce type safety and runtime data validations.
+`src/models/` defines the Pydantic models used by extraction, graph merge, reporting, and ontology configuration loading.
 
----
+## Responsibilities
 
-## 🏗️ Schema Configuration & DTOs
+- Validate extracted nodes and edges before merge/indexing.
+- Load and expose `schemas/ontology_schema.json` as runtime configuration.
+- Normalize confidence labels, entity/relation identifiers, and provenance fields.
+- Keep DTOs stable across pipeline activities, tests, and reporting.
 
-The data model is driven dynamically by `schemas/ontology_schema.json` loaded during runtime:
+## Current Components
 
-```mermaid
-classDiagram
-    class SchemaConfigModel {
-        +List entity_types
-        +List relation_types
-        +ResolutionThresholds resolution_thresholds
-        +GraphAnalysisConfig analysis_config
-    }
-    class Node {
-        +str id
-        +str type
-        +str label
-        +str forensic_summary
-        +str source_file
-        +str source_location
-    }
-    class Edge {
-        +str source
-        +str target
-        +str relation
-        +float confidence
-        +str forensic_summary
-        +str source_file
-        +str source_location
-    }
-    class RawGraphExtraction {
-        +List~Node~ nodes
-        +List~Edge~ edges
-    }
+- `base.py`: ontology/config models such as schema config, thresholds, analysis configuration, and runtime constants.
+- `models.py`: graph DTOs such as `Node`, `Edge`, and extraction containers.
 
-    SchemaConfigModel <-- Node
-    SchemaConfigModel <-- Edge
-    RawGraphExtraction *-- Node
-    RawGraphExtraction *-- Edge
-```
+## Ontology Configuration
 
-### 1. Foundational Configurations (`base.py`)
-- Defines the root `SchemaConfigModel` mapping legal, human, and organizational entity structures.
-- Stores resolution thresholds (`ResolutionThresholds`) for the Jaccard similarity and string distance matching algorithms.
-- Configures community detection settings (`GraphAnalysisConfig`), listing community summarization parameters and timeline regex formats.
+The ontology schema is the shared source of truth for:
 
-### 2. Domain Models (`models.py`)
-- **`Node`**: Validated entity schema. Captures node type, Hebrew labels, forensic descriptions, and document provenance references (`source_file`, `source_location`).
-- **`Edge`**: Validated relationship schema. Contains source/target node identifiers, relationship type, confidence level, textual explanations, and source provenance references.
-- **`RawGraphExtraction`**: Wrapper class used by the chunk extraction activities to represent intermediate partial graphs prior to merge.
+- entity types and semantic classes.
+- relation mappings and confidence levels.
+- extraction guidance and deterministic patterns.
+- entity resolution thresholds.
+- graph analysis settings.
+- `protocol_completeness`, the curated checklist used by the missing-evidence analyzer.
 
----
+Do not duplicate protocol-completeness or ontology rules in code unless they are pure execution mechanics. Legal/product rules should live in `schemas/ontology_schema.json`.
 
-## 🛠️ Data Normalization & Validation Logic
+## Validation Expectations
 
-Pydantic validators (`@model_validator` and `@field_validator`) dynamically enforce several core constraints:
-- **Hebrew Schema Translations**: Maps local/colloquial Hebrew relation inputs (e.g. `מנהל של`) to standardized uppercase relation keys (e.g. `MANAGES`).
-- **epistemic filtering**: Identifies and flags relationships that fall below the schema confidence thresholds.
-- **Provenance Injection**: Guarantees that every node and edge carries reference tags referencing the exact source file and chunk ID where it was identified.
-- **Dynamic Constant Ingestion**: Derives and caches typing mappings, allowed entity labels, and default weights directly from the parsed `ontology_schema.json`.
+Every persisted graph item should carry:
+
+- stable ID.
+- typed label/type.
+- source file or case reference.
+- source location when available.
+- confidence or evidence strength where applicable.
+- metadata needed for reports and auditability.

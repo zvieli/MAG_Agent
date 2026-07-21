@@ -1,5 +1,16 @@
+import json
+import logging
+
 import pytest
-from src.query_agent.state import InvestigationState, VerifiedFact, PendingFactApproval
+from src.query_agent.state import (
+    AssistantMessage,
+    InvestigationState,
+    PendingFactApproval,
+    UserMessage,
+    VerifiedFact,
+    from_external_query_state,
+    to_external_query_state,
+)
 from langgraph.types import Command
 from src.query_agent.nodes import (
     hydrate_node,
@@ -38,6 +49,88 @@ def test_pydantic_serialization():
     assert hydrated.doc_id == "case_123"
     assert len(hydrated.verified_facts) == 1
     assert isinstance(hydrated.verified_facts[0], VerifiedFact)
+
+
+def test_external_query_state_serializes_and_rehydrates_pydantic_objects():
+    state = InvestigationState(
+        doc_id="case_123",
+        investigation_plan=["task1"],
+        verified_facts=[
+            VerifiedFact(
+                fact="הנאשם קיבל שוחד",
+                source_id="chunk_0",
+                doc_id="case_123",
+                confidence=1.0,
+                audit_trace={"timestamp": "2026-07-21T00:00:00Z"},
+            )
+        ],
+        messages=[
+            UserMessage(content="מי החשוד?"),
+            AssistantMessage(content="בודק את חומר החקירה"),
+        ],
+        pending_fact_approval=PendingFactApproval(
+            fact="נדרשת בדיקה נוספת",
+            source_id="Synthesized Evidence Report",
+            doc_id="case_123",
+            audit_trace={"timestamp": "2026-07-21T00:00:00Z"},
+        ),
+        transient_doc_results="large raw search output",
+        transient_graph_results="large graph output",
+        transient_synthesis_results="large synthesis",
+    )
+
+    external = to_external_query_state(state)
+
+    json.dumps(external, ensure_ascii=False)
+    assert "remaining_steps" not in external
+    assert "transient_doc_results" not in external
+    assert "transient_graph_results" not in external
+    assert "transient_synthesis_results" not in external
+    assert isinstance(external["messages"][0], dict)
+    assert external["messages"][0]["role"] == "user"
+    assert external["pending_fact_approval"]["fact"] == "נדרשת בדיקה נוספת"
+
+    rehydrated = from_external_query_state(external)
+    assert isinstance(rehydrated.messages[0], UserMessage)
+    assert isinstance(rehydrated.messages[1], AssistantMessage)
+    assert isinstance(rehydrated.verified_facts[0], VerifiedFact)
+    assert isinstance(rehydrated.pending_fact_approval, PendingFactApproval)
+
+
+@pytest.mark.asyncio
+async def test_answer_question_stateless_returns_json_safe_state(monkeypatch):
+    from src.query_agent import nodes
+    from src.query_agent.query_agent import QueryAgent
+
+    class MockGraph:
+        async def ainvoke(self, _state, config=None):
+            assert config["metadata"]["trace_id"] == "trace-123"
+            assert config["metadata"]["doc_id"] == "case_123"
+            return {
+                "doc_id": "case_123",
+                "messages": [
+                    UserMessage(content="מי החשוד?"),
+                    AssistantMessage(content="בודק"),
+                ],
+                "pending_fact_approval": PendingFactApproval(
+                    fact="עובדה ממתינה",
+                    source_id="src",
+                    doc_id="case_123",
+                    audit_trace={"timestamp": "2026-07-21T00:00:00Z"},
+                ),
+                "transient_doc_results": "should not leave the server boundary",
+            }
+
+    monkeypatch.setattr(nodes, "get_investigative_graph", lambda: MockGraph())
+
+    agent = QueryAgent(doc_id="case_123", stateless=True)
+    result = await agent.answer_question_stateless("מי החשוד?", trace_id="trace-123")
+
+    json.dumps(result, ensure_ascii=False)
+    assert result["pending_fact_approval"]["fact"] == "עובדה ממתינה"
+    assert isinstance(result["messages"][0], dict)
+    assert "transient_doc_results" not in result
+    assert isinstance(from_external_query_state(result).messages[0], UserMessage)
 
 
 @pytest.mark.asyncio
@@ -137,7 +230,7 @@ async def test_process_hitl_node():
     )
     res = await process_hitl_node(state_rejected, {})
     assert len(res["verified_facts"]) == 0
-    assert "REJECTED" in res["messages"][-1]["content"]
+    assert "נדחתה" in res["messages"][-1]["content"]
 
     # Case C: Modified Text
     state_modified = InvestigationState(
@@ -161,11 +254,13 @@ async def test_state_bloat_pruning_and_sanitization():
     # We mock LLM call inside synthesis
     from src.query_agent import nodes
     async def mock_call(sys_p, user_p, **kwargs):
+        assert "ענה בעברית בלבד" in user_p
         return "merged summary"
     nodes.call_llm = mock_call
 
     res_synthesis = await synthesis_node(state_synthesis, {})
     assert res_synthesis["transient_synthesis_results"] == "merged summary"
+    assert res_synthesis["last_tool_path"] == ["doc_search", "graph_query"]
     # Ensure raw inputs are pruned
     assert res_synthesis["transient_doc_results"] is None
     assert res_synthesis["transient_graph_results"] is None
@@ -191,9 +286,10 @@ async def test_state_bloat_pruning_and_sanitization():
     assert res_final["user_feedback"] is None
 
 @pytest.mark.asyncio
-async def test_coordinator_node_command(monkeypatch):
+async def test_coordinator_node_command(monkeypatch, caplog):
     from src.query_agent import nodes
     from src.utils.config_manager import config_manager
+    caplog.set_level(logging.INFO)
     
     async def mock_call(sys, user, **kw):
         if "coordinator_system" in sys or "Initial Question" in user:
@@ -216,6 +312,17 @@ async def test_coordinator_node_command(monkeypatch):
     assert res.goto == ["doc_branch", "graph_branch"]
     assert res.update["current_task"] == "task_1"
     assert res.update["investigation_plan"] == ["task_2"]
+    assert "נבנתה" in res.update["messages"][-2].content
+    assert "מתחילה" in res.update["messages"][-1].content
+    obs_payloads = [
+        json.loads(record.message.split("[OBS] ", 1)[1])
+        for record in caplog.records
+        if "[OBS] " in record.message
+    ]
+    assert any(
+        payload["event"] == "query.langgraph.route.selected" and payload["route"] == "parallel"
+        for payload in obs_payloads
+    )
     
     # 2. Test when plan is empty and current_task is empty (routes to finalizer)
     async def mock_call_empty(sys, user, **kw):
@@ -257,13 +364,15 @@ async def test_extraction_node_command(monkeypatch):
     state_fact = InvestigationState(
         doc_id="case_123",
         current_task="investigate suspects",
-        transient_synthesis_results="John Doe is a suspect based on docs."
+        transient_synthesis_results="John Doe is a suspect based on docs.",
+        last_tool_path=["doc_search", "graph_query"],
     )
     res_fact = await extraction_node(state_fact, {})
     assert isinstance(res_fact, Command)
     assert res_fact.goto == "halt_for_hitl"
     assert res_fact.update["pending_fact_approval"] is not None
     assert res_fact.update["pending_fact_approval"].fact == "John Doe is a suspect"
+    assert res_fact.update["pending_fact_approval"].audit_trace["tool_path"] == ["doc_search", "graph_query"]
     assert res_fact.update["transient_synthesis_results"] is None
     
     # Scenario 3: No fact found
@@ -303,7 +412,7 @@ async def test_recursion_limit_fallback(monkeypatch):
     
     # Run with a recursion limit of 4 (which forces RemainingSteps <= 2 early)
     res = await graph.ainvoke(state_dict, config={"recursion_limit": 4})
-    assert "⚠️ Note: This report was generated on a best-effort basis" in res["final_answer"]
+    assert "⚠️ הערה" in res["final_answer"]
 
 
 def test_message_trimming():

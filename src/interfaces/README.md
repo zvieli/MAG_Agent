@@ -1,51 +1,29 @@
-# Interfaces Module (`src/interfaces/`)
+# Interfaces Module
 
-This module defines the core architectural contracts (using `typing.Protocol`) to guarantee loose coupling, mockability, and swappable components across the ingestion and query workloads.
+`src/interfaces/` defines Python `Protocol` contracts for decoupling pipeline stages from concrete implementations.
 
----
+## Current Protocols
 
-## 🏗️ Core Protocols & Cloud Implementations
+- `KnowledgeProvider`: graph/analysis/document access abstraction.
+- `ExtractionStrategy`: async chunk-to-graph extraction contract.
+- `AnalysisStrategy`: NetworkX graph analysis contract.
+- `PersistenceProvider`: artifact persistence abstraction.
+- `EntityResolver`: node/edge deduplication contract.
+- `StructuralInferrer`: inferred relationship contract.
+- `VectorIndexer`: semantic indexing contract.
+- `Reporter`: Markdown/report generation contract.
 
-```mermaid
-classDiagram
-    class KnowledgeProvider {
-        <<interface>>
-        get_graph_metadata()
-        find_connections()
-        search_edges()
-    }
-    class CloudKnowledgeProvider {
-        +SearchManager search_mgr
-        +CosmosGremlinManager cosmos_mgr
-    }
-    KnowledgeProvider <|.. CloudKnowledgeProvider
+## Why This Exists
 
-    class PersistenceProvider {
-        <<interface>>
-        read_bytes()
-        write_bytes()
-        exists()
-    }
-    class AzureBlobStorage {
-        +BlobServiceClient client
-    }
-    PersistenceProvider <|.. AzureBlobStorage
-```
+These protocols let tests and local workflows substitute implementations without rewriting pipeline orchestration. Concrete implementations currently live mostly under:
 
-### 1. Data Ingestion & Storage Blueprints
-- **`KnowledgeProvider`**: Standardizes retrievals of metadata, edges, and connections.
-  - *Cloud Implementation*: `CloudKnowledgeProvider` in `src/processing/cloud_knowledge_provider.py` (lazily queries Azure Search and Cosmos DB).
-- **`PersistenceProvider`**: Abstracts physical disk or cloud I/O.
-  - *Cloud Implementation*: `AzureBlobStorage` in `src/storage/blob_storage.py` and `IArtifactStore` definitions.
+- `src/processing/`
+- `src/graph/`
+- `src/reporting/`
+- `src/storage/`
 
-### 2. Processing & NLP Blueprints
-- **`ExtractionStrategy`**: Contract defining how document chunks translate to raw node/edge entities.
-  - *Implementation*: `LLMExtractionStrategy` (invokes `extract_from_chunk`).
-- **`EntityResolver`**: Contract defining how duplicate nodes are blocking-grouped and merged.
-  - *Implementation*: `DefaultEntityResolver` (combines Edit Distance, Hebrew normalizations, and Jaccard neighbors).
+## Maintainer Notes
 
-### 3. Reporting & Metrics Blueprints
-- **`VectorIndexer`**: Contract standardizing text embedding generations and vector client operations.
-  - *Implementation*: `SearchManager` in `src/storage/search_manager.py`.
-- **`Reporter`**: Standardizes the compilation of markdown/visual summaries.
-  - *Implementation*: `DefaultReporter` inside `src/processing/strategies.py` delegating to `report_generator.py`.
+- Keep protocols small and behavior-oriented.
+- Do not add Azure-specific types to protocol signatures unless the abstraction intentionally becomes Azure-only.
+- If a protocol changes, update implementations and tests in the same change.

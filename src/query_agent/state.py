@@ -76,6 +76,31 @@ class InvestigationState(InvestigationBaseState):
     transient_doc_results: Optional[str] = None
     transient_graph_results: Optional[str] = None
     transient_synthesis_results: Optional[str] = None
+    last_tool_path: List[str] = Field(default_factory=list)
     
     # Managed Value for recursion tracking
     remaining_steps: Optional[RemainingSteps] = None
+
+
+ExternalQueryStateInput = Union[
+    Dict[str, Any],
+    InvestigationState,
+    InvestigationInputState,
+    InvestigationOutputState,
+]
+
+
+def to_external_query_state(state: ExternalQueryStateInput) -> Dict[str, Any]:
+    """Return the JSON-safe query state that may be sent through Durable/client storage."""
+    if isinstance(state, BaseModel):
+        state_data = state.model_dump()
+    else:
+        state_data = state
+
+    output_state = InvestigationOutputState.model_validate(state_data)
+    return output_state.model_dump(mode="json", exclude_none=False)
+
+
+def from_external_query_state(state: Dict[str, Any]) -> InvestigationState:
+    """Rehydrate client/Durable JSON state into the internal Pydantic runtime state."""
+    return InvestigationState.model_validate(state)

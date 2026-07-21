@@ -1,36 +1,25 @@
-# Evaluation Module (`src/evaluation/`)
+# Evaluation Module
 
-This module provides quantitative and qualitative metrics to measure the health, accuracy, search recall, and reasoning quality of the Knowledge Graph and RAG pipeline.
+`src/evaluation/` contains offline quality checks for extraction, graph health, retrieval, routing, and answer groundedness.
 
----
+## Current Components
 
-## 📊 Core Evaluators
+- `extraction_evaluator.py`: compares extracted graph items against gold/reference extraction data.
+- `graph_evaluator.py`: computes graph quality and topology health metrics.
+- `metrics.py`: shared quality and groundedness metrics.
+- `rag_evaluator.py`: evaluates query-agent answers against expected answers and citations.
+- `retrieval_evaluator.py`: evaluates Azure AI Search retrieval quality for source chunks.
+- `routing_evaluator.py`: evaluates query-routing behavior.
 
-The module contains specialized evaluation classes that run against reference golden datasets:
+## Typical Uses
 
-### 1. RAG Evaluator (`rag_evaluator.py`)
-- Evaluates the end-to-end performance of the query agent answers.
-- Computes **Groundedness Scores** by matching cited fragments in responses to live data.
-- Measures answer relevancy relative to a golden QA dataset.
+- Regression testing extraction quality after prompt/schema changes.
+- Measuring retrieval hit rate after embedding or chunking changes.
+- Checking graph health after entity-resolution changes.
+- Evaluating query-agent groundedness before demos or releases.
 
-### 2. Retrieval Evaluator (`retrieval_evaluator.py`)
-- Tests the retrieval quality of **Azure AI Search** (`graphify-chunks` index).
-- Measures **Hit Rate @ K** (how often the correct chunk is in top results) and **MRR** (Mean Reciprocal Rank) for vector query operations.
+## Maintainer Notes
 
-### 3. Extraction Evaluator (`extraction_evaluator.py`)
-- Measures precision, recall, and F1 scores of the Two-Tier Ingestion engine against gold-standard manual node/edge extractions.
-- Identifies systemic errors (e.g. missing certain relation types).
-
-### 4. Graph Evaluator (`graph_evaluator.py`)
-- Evaluates topological graph characteristics (node count, link density, connected component ratios).
-
----
-
-## 📈 Quality Metrics & Groundedness (`metrics.py`)
-
-- **Groundedness**: Evaluates citations in answers (supporting both legacy brackets `[Source: chunk_id]` and strict parentheses `(Source: filename, Fragment: node_id)`) by querying the Azure AI Search endpoint to verify that the target text contains the assertions made.
-- **Final Quality Score**: Calculates a consolidated graph metric (0-100) based on:
-  - **Connectivity**: Ratio of isolated nodes vs. connected vertices.
-  - **Semantic Coverage**: Percentage of nodes that have complete, factual descriptions.
-  - **Confidence Distribution**: Ratio of `DIRECT_EVIDENCE` vs `CIRCUMSTANTIAL` or `AMBIGUOUS` labels.
-  - **Resolution Health**: Warning metrics triggered by near-merge candidates.
+- Keep evaluators separate from production pipeline activities.
+- Prefer deterministic fixtures and small reference datasets for CI.
+- Do not require live Azure dependencies for unit-level evaluator tests unless the test is explicitly marked/invoked as integration.

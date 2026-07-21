@@ -57,7 +57,9 @@ export class PipelineService implements IPipelineService {
 
     try {
       const preflight = await fetch(preflightUrl, {
-        headers: authHeaders(this.functionKey)
+        headers: authHeaders(this.functionKey, {
+          'x-mag-trace-id': traceId
+        })
       }).then((response) =>
         readJson<PipelinePreflightResult>(response, {
           logger: this.logger,
@@ -111,7 +113,8 @@ export class PipelineService implements IPipelineService {
 
       const headers = authHeaders(functionKey, {
         'Content-Disposition': `attachment; filename="${encodeURIComponent(file.name)}"`,
-        'Content-Type': 'application/pdf'
+        'Content-Type': 'application/pdf',
+        'x-mag-trace-id': traceId
       });
 
       Object.keys(headers as Record<string, string>).forEach((key) => {
@@ -333,7 +336,9 @@ export class PipelineService implements IPipelineService {
     });
 
     const status = await fetch(operation.statusUrl, {
-      headers: authHeaders(this.functionKey)
+      headers: authHeaders(this.functionKey, {
+        'x-mag-trace-id': traceId
+      })
     }).then((response) =>
       readJson<DurableStatus<PipelineOutput>>(response, {
         logger: this.logger,

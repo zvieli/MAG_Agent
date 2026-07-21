@@ -1,16 +1,17 @@
-# מערכת ניתוח תיקי חקירה - ממשק SharePoint
+# MAG SPFx Frontend
 
-זהו ממשק SPFx עבור העלאת מסמכים, מעקב אחר עיבוד, הצגת גרף ידע, צפייה בדו"ח ושיחה עם סוכן חקירה.
+This SharePoint Framework web part is the user interface for MAG Agent. It supports uploading investigation PDFs, tracking pipeline progress, reviewing graph/report/timeline/completeness outputs, and chatting with the query agent.
 
-## טכנולוגיות
+## Stack
 
 - SharePoint Framework 1.23
 - React 17
-- TypeScript
-- Fluent UI
-- Cytoscape.js להצגת גרף ידע
+- TypeScript 5.3
+- Fluent UI 8
+- Cytoscape.js
+- `marked` for Markdown rendering
 
-## הרצה מקומית
+## Local Development
 
 ```bash
 npm install
@@ -18,37 +19,54 @@ npm run trust-cert
 npm run serve
 ```
 
-שרת הפיתוח חושף את קובץ המניפסט בכתובת:
+The dev server exposes the manifest at:
 
 ```text
 https://localhost:4321/temp/build/manifests.js
 ```
 
-ב־SPFx 1.23 אין דף workbench מקומי ישן. יש לפתוח workbench מתוך SharePoint:
+Open the SharePoint workbench with:
 
 ```text
 https://<tenant>.sharepoint.com/_layouts/15/workbench.aspx?debugManifestsFile=https%3A%2F%2Flocalhost%3A4321%2Ftemp%2Fbuild%2Fmanifests.js&loadSPFX=true
 ```
 
-## הגדרות Web Part
+## Web Part Properties
 
-- `apiBaseUrl`: כתובת שירות הענן.
-- `functionKey`: מפתח פונקציה לבדיקות פיתוח. הערך גלוי בכלי הדפדפן ואינו מודל הזדהות לייצור.
-- `useMockData`: שימוש בנתוני דמה במקום קריאות חיות.
-- `pollIntervalMs`: מרווח בדיקת מצב במילישניות.
+- `apiBaseUrl`: Function App base URL, for example `http://localhost:7071` or `https://<app>.azurewebsites.net`.
+- `functionKey`: optional Function key for development/test environments. This is visible in browser tools and is not a production auth model.
+- `useMockData`: toggles local mock services instead of live API calls.
+- `pollIntervalMs`: Durable status polling interval.
+- `enableDebugLogs`: enables frontend debug logs in the browser console.
 
-## חוזי Backend
+## Backend Contracts Used By The UI
 
-זמינים כעת:
+- `GET /api/health`
+- `GET /api/pipeline-preflight?filename=<filename>`
+- `POST /api/pipelines`
+- `GET /api/pipelines/{instanceId}`
+- `POST /api/query`
+- `GET /api/cases/{docId}/graph`
+- `GET /api/cases/{docId}/timeline`
+- `GET /api/cases/{docId}/report`
+- `GET /api/cases/{docId}/communities`
+- `GET /api/cases/{docId}/completeness`
 
-- `POST /api/pipelines`: מקבל גוף PDF ומתחיל עיבוד.
-- `GET /api/pipelines/{instanceId}`: מחזיר מצב עיבוד.
-- `POST /api/query`: מקבל `{ "question": "...", "doc_id": "..." }` ומתחיל שאילתת סוכן.
-- כתובת Durable status המוחזרת מקריאת השאילתה.
+Pipeline and query requests send:
 
-נקודות קריאה עבור הממשק:
+```http
+x-mag-trace-id: <client-generated-trace-id>
+```
 
-- `GET /api/cases/{docId}/graph`: מחזירה גרף להצגה מתוך Gremlin לפי `partitionKey = docId`.
-- `GET /api/cases/{docId}/report`: מחזירה את `GRAPH_REPORT.md` מתוך Blob Storage.
+## Observability
 
-עמוד הגרף אינו קורא קובצי JSON זמניים. נתוני ההדגמה נשמרים בזיכרון בלבד מאחורי אותו מתאם שישמש את נקודת ה־Gremlin.
+When `enableDebugLogs` is on, the frontend logs request/response groups with trace IDs. The same trace IDs are sent to the backend and can be searched in Function logs or App Insights.
+
+Repeated identical chat questions may be served from browser cache and will not always start a backend query. Use a new question or clear browser cache when validating backend query observability.
+
+## Checks
+
+```bash
+./node_modules/.bin/tsc --noEmit
+npm run build
+```

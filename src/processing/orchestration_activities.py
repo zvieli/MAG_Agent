@@ -30,6 +30,7 @@ from src.reporting.report_generator import (
 from src.reporting.protocol_completeness import analyze_protocol_completeness
 from src.processing.persistence_manager import PersistenceManager
 from src.storage.blob_storage import AzureBlobStorage
+from src.utils.observability import log_event, log_metric
 
 
 def _compact_error(exc: Exception | str, *, limit: int = 3000) -> str:
@@ -96,6 +97,7 @@ async def _build_community_summary_payload(
         logging.info(
             "[ACTIVITY][FINAL_INDEXING] LLM community summaries disabled; using deterministic fallbacks."
         )
+        log_metric("community_summary_llm_skipped_count", 1)
         summaries = fallback_community_summaries(G, communities, community_labels)
 
     payload = {
@@ -545,6 +547,25 @@ async def activity_final_indexing(merged_graph_path: str) -> str:
                 schema_config=SCHEMA_CONFIG,
                 graph_data=graph_data,
                 raw_text=raw_text,
+                doc_id=doc_id,
+            )
+            protocol_summary = protocol_report.get("summary") or {}
+            log_event(
+                "protocol_completeness.generated",
+                doc_id=doc_id,
+                coverage_percent=protocol_summary.get("coveragePercent"),
+                critical_missing=protocol_summary.get("criticalMissing"),
+                critical_review_required=protocol_summary.get("criticalReviewRequired"),
+            )
+            log_metric(
+                "protocol_completeness_coverage_percent",
+                protocol_summary.get("coveragePercent") or 0,
+                unit="percent",
+                doc_id=doc_id,
+            )
+            log_metric(
+                "protocol_completeness_critical_missing",
+                protocol_summary.get("criticalMissing") or 0,
                 doc_id=doc_id,
             )
             protocol_json = json.dumps(

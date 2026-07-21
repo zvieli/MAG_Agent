@@ -1,46 +1,45 @@
-# Reporting & Community Summarization Module (`src/reporting/`)
+# Reporting Module
 
-This module transforms structured Knowledge Graph data into human-readable briefings, temporal timelines, topological summaries, and interactive graph visualizations.
+`src/reporting/` generates human-readable case artifacts from the resolved graph and extracted text.
 
----
+## Responsibilities
 
-## 📊 Reporting & Clustering Lifecycle
+- Build Markdown graph reports.
+- Generate community/topology summaries.
+- Produce visual graph artifacts.
+- Generate protocol completeness results for missing-evidence review.
 
-During the final stage of document ingestion (`activity_final_indexing`), the system performs the following analytical tasks:
+## Current Components
 
-```mermaid
-graph TD
-    A[Resolved Graph Data] --> B[NetworkX Ingestion]
-    B --> C[Hierarchical Community Clustering]
-    C --> D[Generate LLM Cluster Summaries]
-    D -->|Save JSON| E[community_summaries.json]
-    B --> F[Temporal Consistency Analysis]
-    B --> G[Entity Resolution Health Check]
-    E & F & G --> H[Generate GRAPH_REPORT.md]
-    H --> I[Generate Visual Graph cytoscape HTML]
-    I -->|Persist| J[Azure Blob Storage - graph/doc_id/]
-```
+- `report_generator.py`: graph report generation, NetworkX analysis, community summary handling, and visualization/report artifact creation.
+- `protocol_completeness.py`: analyzer for `protocol_completeness` rules from `schemas/ontology_schema.json`; emits `protocol_completeness.json`.
 
-### 1. Community Summarization
-- Imports the resolved graph JSON into **NetworkX**.
-- Run community detection algorithms (clustering and hierarchical mapping).
-- Calls OpenAI (`gpt-4o`) to summarize each community's role and key activities, creating a `community_summaries.json` stored in the root and nested `doc_id` folders.
+## Protocol Completeness
 
-### 2. Forensic Report Generation
-- **`GRAPH_REPORT.md`**: Implements standard templates showing:
-  - High-level project stats (total nodes, edges, resolved aliases).
-  - Central Actors list sorted by degree connectivity.
-  - LLM community summaries.
-  - Topological anomaly flags (e.g. temporal sequence issues, duplicate resolution health warnings).
+The completeness analyzer checks whether required or conditionally required investigation materials were found in the uploaded case. It uses:
 
-### 3. Topological Anomaly Checks
-- **Temporal Consistency**: Flags logic errors such as cause relationships occurring *after* effects by comparing event dates.
-- **Resolution Health**: Detects potential human or organization entity duplicates that fall just below the merge thresholds, facilitating manual inspection.
+- curated checklist configuration from `schemas/ontology_schema.json`.
+- raw chunk text from Azure Search/backfill/local artifacts.
+- graph inventory signals from extracted nodes/edges.
+- keyword and regex signals.
+- evidence strength and review notes for weak matches.
 
----
+The result is an advisory artifact, not a legal determination.
 
-## 📂 Key Components
+Common statuses:
 
-- **`report_generator.py`**: Coordinates NetworkX graph construction, temporal evaluations, community summaries, and report compilation.
-- **`local_graphify.py` (in `src/graph/`)**: Implements graph clustering and hierarchy parsing.
-- **`persistence_manager.py` (in `src/processing/`)**: Ensures reports and visualizations are stored at correct paths in Azure Blob storage.
+- `present`
+- `missing`
+- `conditional_missing`
+- `not_applicable`
+- `unknown`
+
+## Community Summaries
+
+Community detection is still part of report generation, but LLM-written community summaries are cost-controlled by configuration. When disabled, deterministic fallback summaries keep reports usable without extra LLM calls.
+
+## Maintainer Notes
+
+- Keep report artifacts explainable and source-linked.
+- Keep legal checklist rules in the ontology schema, not in Python.
+- Do not mark weak exhibit descriptions as full chain-of-custody proof without explicit chain evidence.

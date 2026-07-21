@@ -1,78 +1,51 @@
-# Investigation Agent (`src/query_agent/`)
+# Query Agent Module
 
-This module houses the orchestrator and reasoning layer of the MAG Agent. It implements a **Stateless LangGraph Pipeline** to verify, search, and synthesize evidence-backed legal answers while ensuring strict partition isolation, payload control, and mandatory human-in-the-loop (HITL) review.
+`src/query_agent/` implements the investigative reasoning layer used by `POST /api/query`.
 
----
+The query workload is Durable-orchestrated in `function_app.py`; the activity creates a stateless `QueryAgent`, answers against the active case, and returns the answer plus updated state.
 
-## 🗺️ State-Passing Architecture
+## Responsibilities
 
-Unlike traditional stateful agents that require databases to hold conversation checkpointers, this agent is **stateless**. The entire graph state is serialized to JSON, returned to the client (e.g. CLI or Frontend API), and sent back to the server on the subsequent turn.
+- Answer Hebrew investigation questions from graph data and source chunks.
+- Keep all retrieval scoped to the requested `doc_id`.
+- Combine graph traversals, Azure AI Search chunk retrieval, ontology checks, and synthesis.
+- Return JSON-serializable state so the frontend can continue a conversation.
+- Emit query observability through the Function App trace ID.
 
-### The Ledger of Admissible Facts (`InvestigationState`)
-The state structure is defined using Pydantic in [state.py](file:///home/lior/projects/MAG_Agent/src/query_agent/state.py):
-- `doc_id`: Partition key of the current investigation case (mandatory for Cosmos DB isolation).
-- `investigation_plan`: A scheduled list of sub-tasks built by the Planner/Coordinator.
-- `verified_facts`: The official "Admissible Ledger" of facts confirmed by the user.
-- `pending_fact_approval`: Stores facts discovered by the Extraction node awaiting user approval.
-- `user_feedback`: Collects the user's action (Approved / Discarded / Edited) on the pending fact.
-- `transient_*`: Temporary stores for parallel doc search, graph traversals, and synthesis results that are wiped before returning to the client.
+## Current Components
 
----
+- `query_agent.py`: outer agent runtime, tool definitions, and stateless answer API.
+- `nodes.py`: graph/state-machine node functions used by the query flow.
+- `state.py`: Pydantic state models for messages, verified facts, pending approvals, and transient retrieval data.
+- `ontology_engine.py`: ontology and structural rule checks over graph data.
+- `graph_query_builder.py`: helper for building graph queries in controlled cases.
 
-## 🔁 LangGraph Execution Flow
+## Runtime Flow
 
-The graph contains 10 nodes linked sequentially and conditionally:
+1. `POST /api/query` receives `{ "doc_id": "...", "question": "...", "state": ... }`.
+2. The HTTP route reads or creates `x-mag-trace-id` and starts `query_orchestrator`.
+3. The orchestrator sets custom status with `phase`, `doc_id`, `trace_id`, and `last_error`.
+4. `activity_query_investigation` creates `QueryAgent(doc_id=..., stateless=True)`.
+5. The agent retrieves graph/source evidence and returns `{ "answer": "...", "state": ..., "trace_id": "..." }`.
 
-```mermaid
-graph TD
-    START([Start]) --> Hydrate[Hydrate Node]
-    Hydrate -->|Feedback Present| ProcessHITL[Process HITL Node]
-    Hydrate -->|No Feedback| Coordinator[Coordinator Node]
-    ProcessHITL --> Coordinator
-    
-    Coordinator --> ParallelBranch{Execute Sub-tasks}
-    ParallelBranch -->|Doc Query| DocSearch[doc_search tool]
-    ParallelBranch -->|Graph Query| GraphQuery[graph_query tool]
-    
-    DocSearch --> Synthesis[Synthesis Node]
-    GraphQuery --> Synthesis
-    
-    Synthesis --> Extraction[Extraction Node]
-    
-    Extraction -->|New Fact Found| Halt[Halt for HITL Node]
-    Extraction -->|No New Facts| Finalizer[Finalizer Node]
-    
-    Halt --> END([Return State to Client])
-    Finalizer --> END
+## Observability
+
+Expected structured events:
+
+- `query.started`
+- `query.orchestrator_started`
+- `query.completed`
+- `query.failed`
+- metric events: `query_success_count`, `query_duration_ms`, `query_failure_count`
+
+Trace local logs with:
+
+```bash
+docker compose logs --tail=1000 function-app | rg "<query-trace-id>|query\\."
 ```
 
-### Key Execution Stages:
-1. **Hydrate Node:** Validates the state schema and enforces **security ownership checks** (verifies that `doc_id` belongs to the current user's permitted cases).
-2. **Process HITL Node:** If `user_feedback` is present, it processes the choice (writing the fact to `verified_facts` with full audit trace details or discarding it) and clears the pending state.
-3. **Coordinator Node:** Deconstructs the user query into parallelizable sub-queries.
-4. **Parallel Tools:** Runs high-performance database traversals (`graph_query`, `graph_timeline`, `check_ontology_rules`) and text index matching (`doc_search`).
-5. **Synthesis Node:** Integrates the evidence from all branches.
-6. **Extraction Node:** Identifies new facts, populates `pending_fact_approval` if any are found, and prunes transient retrieved data to prevent payload bloat.
-7. **Halt for HITL Node:** Forces an interrupt before fact admission, returning the state payload to the client.
-8. **Finalizer Node:** Formulates the final Hebrew response using **only** the approved facts in the ledger, then sanitizes the payload for the client.
+## Maintainer Notes
 
----
-
-## 🛠️ Specialized Programmatic Tools
-
-To prevent LLM query confusion and Gremlin injection risks, dynamic Gremlin generation is deprecated in favor of structured Python tools in [query_agent.py](file:///home/lior/projects/MAG_Agent/src/query_agent/query_agent.py):
-- **`graph_query`**: Traverses nodes and shortest paths inside Cosmos DB.
-- **`graph_timeline`**: Extracts chronologically sorted event chains.
-- **`check_ontology_rules`**: Runs the 7 pushdown legal logic rules directly inside Cosmos DB.
-- **`doc_search`**: Performs hybrid semantic vector search against the Azure AI Search index.
-
-All database tools programmatically inject the current `doc_id` as the partition key.
-
----
-
-## 📂 Key Components
-
-- **[query_agent.py](file:///home/lior/projects/MAG_Agent/src/query_agent/query_agent.py)**: Defines the outer agent runtime, specialized tools, and the interactive client-side chat loop.
-- **[nodes.py](file:///home/lior/projects/MAG_Agent/src/query_agent/nodes.py)**: Implements all LangGraph execution nodes and compiles the graph structure.
-- **[state.py](file:///home/lior/projects/MAG_Agent/src/query_agent/state.py)**: Defines the JSON-serializable `InvestigationState` models.
-- **[ontology_engine.py](file:///home/lior/projects/MAG_Agent/src/query_agent/ontology_engine.py)**: Evaluates structural legal integrity constraints as optimized Cosmos DB pushdown queries.
+- Do not bypass `doc_id`; global graph queries are unsafe for normal user-facing answers.
+- Keep large retrieval details in transient state fields and prune them before returning to the client.
+- Keep final answers grounded in retrieved source text or graph facts.

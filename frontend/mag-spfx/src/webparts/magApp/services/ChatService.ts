@@ -46,7 +46,8 @@ export class ChatService implements IChatService {
     const start = await fetch(url, {
       method: 'POST',
       headers: authHeaders(this.functionKey, {
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'x-mag-trace-id': traceId
       }),
       body: JSON.stringify({ doc_id: docId, question, state })
     }).then((response) =>
@@ -102,7 +103,9 @@ export class ChatService implements IChatService {
     });
 
     const status = await fetch(statusUrl, {
-      headers: authHeaders(this.functionKey)
+      headers: authHeaders(this.functionKey, {
+        'x-mag-trace-id': pollTraceId
+      })
     }).then((response) =>
       readJson<DurableStatus<ChatAnswer>>(response, {
         logger: this.logger,

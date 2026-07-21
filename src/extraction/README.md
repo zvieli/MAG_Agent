@@ -1,41 +1,45 @@
-# Investigative Extraction Module (`src/extraction/`)
+# Extraction Module
 
-This module is responsible for transforming raw document chunks into structured graph components (nodes and edges) using a **Two-Tier LLM Ingestion Model**.
+`src/extraction/` turns document chunks into schema-conformant graph nodes and edges.
 
----
+## Responsibilities
 
-## 🏗️ Architecture: Two-Tier Extraction
+- Build extraction prompts from the ontology and chunk context.
+- Call Azure OpenAI for graph extraction.
+- Repair and parse model JSON safely.
+- Normalize extracted entities and relations against `schemas/ontology_schema.json`.
+- Attach source provenance so downstream graph, reports, and completeness checks can explain where evidence came from.
 
-The extraction process is executed in two distinct phases to enforce schema adherence, handle Hebrew language quirks, and capture context.
+## Current Components
+
+- `extraction_engine.py`: prompt construction, Azure OpenAI client usage, chunk-level extraction, retry/error handling, and token accounting.
+- `post_processor.py`: schema normalization, Hebrew relation mapping, confidence handling, synthetic anchors, source metadata binding, and low-quality item filtering.
+
+## Pipeline Position
 
 ```mermaid
-graph TD
-    A[Text Chunk Input] --> B[Pre-Extraction Regex Layer]
-    B -->|Find Dates, Numbers, References| C[Phase 1: Raw LLM Extraction]
-    C -->|Construct Raw Graph Objects| D[Phase 2: Normalization & Spec Enforcement]
-    D -->|Validate against ontology_schema.json| E[Apply Hebrew Spec rules]
-    E -->|Generate Synthetic Context Anchors| F[Filter & Resolve Relations]
-    F --> G[Pydantic Normalized Extraction]
+graph LR
+    Chunk[Text chunk] --> Engine[extraction_engine.py]
+    Engine --> Raw[Raw model JSON]
+    Raw --> Repair[JSON repair]
+    Repair --> Post[post_processor.py]
+    Post --> Graph[Validated partial graph]
 ```
 
-### 1. Phase 1: Raw Extraction (`extraction_engine.py`)
-- **Ontology Mapping**: Extracts entities and relationships according to `ontology_schema.json`.
-- **Regex Assistance**: Employs deterministic regex patterns to capture dates, monetary values, and source citations prior to sending prompts to the LLM.
-- **Robust Cloud Connectivity**: Handles connection retries, custom timeouts, and DNS ip-lookup overrides to resolve cloud endpoints (e.g. Azure OpenAI endpoints) safely.
-- **Caching**: Employs caching mechanism for extracted chunks to minimize LLM transaction costs and latency.
+## Inputs And Outputs
 
-### 2. Phase 2: Normalization & Spec Enforcement (`post_processor.py`)
-- **Hebrew Schema Mapping**: Maps free-form Hebrew relations and node attributes to formal schema identifiers (e.g. mapping `מנהל` to `MANAGES`).
-- **Synthetic Context Anchors**: Generates co-occurrence context entities representing the specific document chunk where relationships occurred, linking entities together to prevent loss of situational context.
-- **Confidence Scoring**: Assigns numeric confidence values based on evidence classifications:
-  - `DIRECT_EVIDENCE` (high weight)
-  - `CIRCUMSTANTIAL` (medium weight)
-  - `AMBIGUOUS` (low weight)
-- **Sanitization**: Filters low-confidence/noisy entities and resolves orphan properties.
+Input:
 
----
+- chunk text.
+- chunk label/source location.
+- ontology configuration.
 
-## 📂 Key Components
+Output:
 
-- **`extraction_engine.py`**: The core extraction driver. Formulates system and user prompts (located in the root `/prompts` folder), manages tokens, builds the Azure OpenAI client, and calls `extract_from_chunk`.
-- **`post_processor.py`**: Implementation of post-extraction normalizers, schema validations, Hebrew token translations, and metadata binding.
+- partial graph object with normalized `nodes`, `edges`, confidence, source file, source location, and metadata.
+
+## Maintainer Notes
+
+- Legal/domain extraction rules belong in `schemas/ontology_schema.json` and prompts, not hardcoded branches.
+- Deterministic regex extraction should complement the LLM, not replace schema validation.
+- Preserve source snippets and locations whenever available; auditability depends on them.

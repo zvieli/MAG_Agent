@@ -15,6 +15,7 @@ export interface PipelineCustomStatus {
   message?: string;
   blob_path?: string;
   doc_id?: string;
+  trace_id?: string;
   total_chunks?: number;
   completed_chunks?: number;
   current_batch?: number;
@@ -58,6 +59,7 @@ export interface PipelinePreflightResult {
   } | null;
   cache_hit?: boolean;
   error?: string;
+  trace_id?: string;
 }
 
 export interface PipelineOperation {

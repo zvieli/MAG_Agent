@@ -1,109 +1,337 @@
-# MAG Agent (GraphRAG System for Hebrew Documents)
+# MAG Agent
 
-MAG Agent is a cloud-native, high-fidelity **Hybrid GraphRAG** (Graph Retrieval-Augmented Generation) system built for forensic and investigative analysis of Hebrew documents. It ingests files, extracts structured entities and relationships according to a strict legal/investigative ontology, resolves duplicates, builds a queryable property graph, and leverages an LLM reasoning agent to execute multi-hop pathfinding and grounded synthesis.
+MAG Agent is a Hebrew investigative GraphRAG system for military/legal investigation files. It ingests raw PDFs, extracts a typed knowledge graph, stores searchable evidence artifacts, and exposes a query agent that answers case questions from graph and source material.
+
+The current system has three main surfaces:
+
+- **Ingestion pipeline**: Azure Durable Functions map-reduce pipeline for PDF parsing, chunking, graph extraction, merge, indexing, report generation, and protocol completeness checks.
+- **Case APIs**: HTTP endpoints for graph, timeline, report, communities, protocol completeness, pipeline status, and query-agent execution.
+- **SPFx frontend**: SharePoint web part for upload, pipeline tracking, graph/report/timeline review, protocol completeness review, and chat with the query agent.
 
 ---
 
-## 🌌 System Architecture
-
-The project consists of two primary operational workloads: **Ingestion & Processing** (orchestrated by Azure Durable Functions) and **Querying & Reasoning** (orchestrated by the query agent).
+## Architecture
 
 ```mermaid
 graph TD
-    A[Raw PDF / Upload] -->|Trigger| B(Azure Durable Function app)
-    B -->|Ingest & Parse| C[Azure AI Document Intelligence]
-    C -->|Extract Text & Chunk| D[Sliding Window Chunking]
-    D -->|Index Chunks| E[Azure AI Search]
-    D -->|Fan-Out Extract| F[Two-Tier LLM Extraction]
-    F -->|Consolidate & Deduplicate| G[Entity Resolver]
-    G -->|Sync Graph| H[(Azure Cosmos DB - Gremlin API)]
-    G -->|Analyze Topology| I[NetworkX Community Detection]
-    I -->|Summarize Communities| J[LLM Community Summarizer]
-    J -->|Output Reports| K[Blob Storage / Reports]
-    
-    L[User Query] -->|Ask| M[Reasoning Agent - RARR Loop]
-    M -->|Pathfinding / Centrality| H
-    M -->|Vector Search Chunks| E
-    M -->|Fetch Verbatim Quotes| K
-    M -->|Map-Reduce Routing| N[Synthesized Citation Response]
+    PDF[Raw PDF] --> API[Function App HTTP API]
+    API --> ORCH[Durable pipeline_orchestrator]
+    ORCH --> DI[Azure AI Document Intelligence]
+    DI --> CHUNKS[Chunk artifacts + Azure AI Search]
+    CHUNKS --> LLM[LLM graph extraction]
+    LLM --> MERGE[Entity resolution + merge]
+    MERGE --> COSMOS[(Cosmos DB Gremlin)]
+    MERGE --> REPORTS[Blob reports + visualizations]
+    MERGE --> COMPLETE[Protocol completeness artifact]
+
+    UI[SPFx Frontend] --> API
+    API --> QUERY[Durable query_orchestrator]
+    QUERY --> AGENT[Query Agent]
+    AGENT --> COSMOS
+    AGENT --> CHUNKS
+    AGENT --> REPORTS
 ```
 
-### 1. Ingestion & Map-Reduce Pipeline
-- **Orchestration**: Built on **Azure Durable Functions (Python V2 model)**, implementing a parallelized Map-Reduce workflow.
-- **Parsing & Hebrew RTL Fixes**: Uses **Azure AI Document Intelligence** for layout-aware PDF text extraction, fixing RTL visual issues (reversed Hebrew characters).
-- **Semantic Indexing**: Splits text into sentence-based overlapping chunks, generating embeddings with OpenAI models and uploading them to **Azure AI Search** (index: `graphify-chunks`).
-- **Two-Tier Parallel Extraction**:
-  - **Phase 1 (Raw Extraction)**: Employs `gpt-4o` with structural regex overrides (dates, amounts) to perform parallelized, sliding-window entity and relation extraction.
-  - **Phase 2 (Post-Processing & Validation)**: Normalizes outputs against `ontology_schema.json` and generates context nodes (anchors) for co-occurrences.
-- **Entity Resolution**: Resolves duplicate actors/locations via name-blocking, string similarities, and neighbor-based Jaccard scores. It deduplicates node aliases while archiving historical provenance inside Cosmos edge properties.
-- **Unified Sync**: Automatically synchronizes the resolved network graph to **Azure Cosmos DB** (Gremlin API) with strict partition isolation using the document's ID (`doc_id`).
-- **Community Summaries & Reporting**: Utilizes **NetworkX** to compute hierarchical community detection, generates LLM summaries for each cluster, and exports interactive Cytoscape HTML visualizations and Markdown summaries to Blob Storage.
+Core data flow:
 
-### 2. Reasoning & Retrieval (Query Agent)
-- **RARR Loop**: Uses a **Reasoning, Action, Retrieval, and Revision** execution pattern to draft answers, query sources, verify citations against raw text fragments, and revise responses to avoid hallucination.
-- **Investigative Toolset**: Equipped with custom tools for deep graph analysis:
-  - `global_graph_search`: Scans community summaries.
-  - `find_connections`: Shortest-path traversals in Cosmos DB via Gremlin.
-  - `search_semantic_actions`: Vector similarity search on relationship/edge labels.
-  - `get_central_actors`: Degree centrality calculations to find primary actors.
-  - `search_original_document`: Semantic chunk search in Azure AI Search.
-  - `build_timeline`: Synthesizes chronological sequences of case occurrences.
-  - `find_isolated_entities`: Searches for weakly connected actors relative to a seed node.
-- **Map-Reduce Routing**: Automatically splits complex comparative queries (e.g. comparing actors across multiple events) into sub-queries, executes them in parallel, and merges findings.
+1. `POST /api/pipelines` receives a PDF and starts a Durable ingestion instance.
+2. The pipeline writes chunks, raw text, partial graph artifacts, final graph JSON, reports, and `protocol_completeness.json`.
+3. Final graph nodes/edges are synced to Cosmos DB Gremlin with strict per-case partitioning using `doc_id`/`pk`.
+4. The frontend and query agent read the same case artifacts through HTTP APIs.
 
 ---
 
-## 📂 Project Structure
+## Repository Map
 
-```bash
+```text
 MAG_Agent/
-├── .agents/                 # Workspace rules and specialized configurations
-├── prompts/                 # System and user prompts for extraction & query routing
-├── schemas/                 # Ontology and configurations for Pydantic models
-├── scripts/                 # Utility scripts (test connections, cleanups, runs)
-├── tests/                   # PyTest test cases for pipeline validation
-└── src/                     # Core Python source code
-    ├── models/              # Pydantic V2 schemas (Node, Edge, GraphExtraction)
-    ├── interfaces/          # Blueprints and typing.Protocol definitions
-    ├── processing/          # Ingestion, chunking, and Durable Function orchestration
-    ├── extraction/          # Two-Tier LLM extraction and ontology normalizer
-    ├── graph/               # Graph Manager, Cosmos Gremlin connector, Entity Resolver
-    ├── query_agent/         # RARR reasoning engine, ontology rules, query tools
-    ├── reporting/           # NetworkX community summaries & visualization reports
-    ├── evaluation/          # Graph health metrics & RAG groundedness verifiers
-    └── utils/               # JSON repairing, Bidi Hebrew support, config settings
+├── function_app.py              # Azure Functions HTTP routes, Durable orchestrators, activities
+├── schemas/ontology_schema.json # Extraction ontology + protocol completeness configuration
+├── scripts/                     # Local/cloud runbooks and backfill utilities
+├── monitoring/                  # Azure Monitor / App Insights KQL snippets
+├── frontend/mag-spfx/           # SharePoint Framework web part
+├── src/extraction/              # LLM extraction and post-processing
+├── src/graph/                   # Entity resolution, graph normalization, Cosmos sync
+├── src/models/                  # Pydantic DTOs and ontology config models
+├── src/processing/              # Pipeline activities, chunking, indexing, cloud retrieval
+├── src/query_agent/             # Query agent state, tools, LangGraph-style nodes
+├── src/reporting/               # Markdown reports and protocol completeness analyzer
+├── src/storage/                 # Blob/Azurite artifact store and Azure Search manager
+└── src/utils/                   # Config, JSON repair, Hebrew helpers, observability
 ```
+
+Each source module has its own README for implementation orientation.
 
 ---
 
-## 🛠️ Getting Started & Local Operations
+## Local Operations
 
-### Environment Configurations
-Create a `.env` file in the root directory based on the environment variables defined in `.env` (or configure them directly in your container/host runtime):
-- `AZURE_OPENAI_API_KEY` & `AZURE_OPENAI_ENDPOINT`: Access to LLM and embedding APIs.
-- `COSMOS_GREMLIN_ENDPOINT` & `COSMOS_GREMLIN_KEY`: Access to Cosmos DB Graph database.
-- `AZURE_STORAGE_CONNECTION_STRING` / `AzureWebJobsStorage`: Storage account connection.
-- `AZURE_SEARCH_ENDPOINT` & `AZURE_SEARCH_KEY`: Access to Azure AI Search.
-- `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT` & `AZURE_DOCUMENT_INTELLIGENCE_KEY`: Document processing key.
+### Prerequisites
 
-### Local Ingestion Stack (Docker Compose)
-The repository includes a `docker-compose.yml` to spin up local development dependencies:
-- **Azurite**: Emulates local Blob, Queue, and Table storage.
-- **Function App Container**: Runs the local Azure Functions runtime environment.
+Configure the required environment variables in `.env` or in the container runtime:
 
-Start the stack:
+- `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_ENDPOINT`
+- `AZURE_SEARCH_ENDPOINT`, `AZURE_SEARCH_KEY`
+- `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`, `AZURE_DOCUMENT_INTELLIGENCE_KEY`
+- `COSMOS_GREMLIN_ENDPOINT`, `COSMOS_GREMLIN_KEY`
+- `AZURE_STORAGE_CONNECTION_STRING`, `AzureWebJobsStorage`, or Azurite-compatible local storage settings
+
+### Start the Stack
+
 ```bash
 docker compose up --build
 ```
 
-### Monitoring & Operations
-- Check system health by querying the deep health check route:
-  ```bash
-  curl http://localhost:7071/api/health
-  ```
-- Send a document to the ingestion pipeline:
-  ```bash
-  curl -X POST --data-binary @path/to/doc.pdf -H "Content-Disposition: attachment; filename=doc.pdf" http://localhost:7071/api/pipelines
-  ```
-- View system logs, query databases, and manage storage containers using [CLOUD_OPERATIONS.md](file:///home/lior/projects/MAG_Agent/CLOUD_OPERATIONS.md).
-- To deploy as a zip file to Azure App Service, follow [ZIP_DEPLOYMENT.md](file:///home/lior/projects/MAG_Agent/ZIP_DEPLOYMENT.md).
+Health check:
+
+```bash
+curl -sS http://localhost:7071/api/health | jq
+```
+
+### Run Pipeline Locally
+
+The local script restarts the Docker stack, runs dependency preflight, checks duplicate case status, uploads the PDF, polls the Durable instance, and prints the trace lookup key.
+
+```bash
+scripts/run_pipeline.sh
+```
+
+Override the PDF or trace ID:
+
+```bash
+PDF_PATH="data/my_case.pdf" TRACE_ID="pipeline-local-$(date +%s)" scripts/run_pipeline.sh
+```
+
+Cloud runner:
+
+```bash
+AZURE_FUNCTION_APP_URL="https://<app>.azurewebsites.net" \
+AZURE_FUNCTION_APP_KEY="<function-key>" \
+PDF_PATH="data/my_case.pdf" \
+scripts/run_pipeline_cloud.sh
+```
+
+### Query Agent Test
+
+```bash
+TRACE_ID="query-test-$(date +%s)"
+DOC_ID="<case-doc-id>"
+
+START_RESPONSE=$(curl -sS -X POST "http://localhost:7071/api/query" \
+  -H "Content-Type: application/json" \
+  -H "x-mag-trace-id: ${TRACE_ID}" \
+  --data-binary @- <<JSON
+{
+  "doc_id": "${DOC_ID}",
+  "question": "מי החשודה המרכזית בתיק ומה מיוחס לה?"
+}
+JSON
+)
+
+echo "$START_RESPONSE" | jq
+```
+
+Poll the returned Durable instance:
+
+```bash
+INSTANCE_ID=$(echo "$START_RESPONSE" | jq -r '.id // empty')
+
+curl -sS "http://localhost:7071/api/pipelines/${INSTANCE_ID}" \
+  -H "x-mag-trace-id: ${TRACE_ID}" \
+  | jq
+```
+
+---
+
+## API Surface
+
+Primary local endpoints:
+
+- `GET /api/ping`
+- `GET /api/health`
+- `GET /api/debug_logs` enabled only in local/dev or with `MAG_ENABLE_DEBUG_LOGS=true`
+- `POST /api/pipelines`
+- `GET /api/pipeline-preflight?filename=<filename>`
+- `GET /api/pipelines/{instanceId}`
+- `POST /api/query`
+- `GET /api/cases/{docId}/graph`
+- `GET /api/cases/{docId}/timeline`
+- `GET /api/cases/{docId}/report`
+- `GET /api/cases/{docId}/communities`
+- `GET /api/cases/{docId}/completeness`
+
+All pipeline and query requests should include:
+
+```http
+x-mag-trace-id: <client-generated-trace-id>
+```
+
+---
+
+## Observability
+
+The Function App emits structured logs with the `[OBS]` prefix. Trace IDs correlate HTTP requests, Durable status, activity logs, metrics, frontend debug logs, and App Insights traces.
+
+Detailed Azure Monitor / App Insights KQL examples are maintained in [monitoring/azure_monitor_observability.md](monitoring/azure_monitor_observability.md).
+
+### Local Trace Lookup
+
+For a known Durable instance, fetch its status and read `customStatus.trace_id`:
+
+```bash
+INSTANCE_ID="<durable-instance-id>"
+
+TRACE_ID=$(curl -sS "http://localhost:7071/api/pipelines/${INSTANCE_ID}" \
+  -H "x-mag-trace-id: lookup-${INSTANCE_ID}" \
+  | jq -r '.customStatus.trace_id // empty')
+
+echo "$TRACE_ID"
+```
+
+Search recent local logs:
+
+```bash
+docker compose logs --tail=1000 function-app \
+  | rg "${TRACE_ID}|${INSTANCE_ID}"
+```
+
+Pretty-print only structured observability logs:
+
+```bash
+docker compose logs --tail=1000 function-app \
+  | rg "\[OBS\].*(${TRACE_ID}|${INSTANCE_ID})" \
+  | sed -E 's/^.*\[OBS\] //' \
+  | jq
+```
+
+### Query Agent Trace Lookup
+
+Start a query with an explicit trace ID:
+
+```bash
+TRACE_ID="query-test-$(date +%s)"
+DOC_ID="<case-doc-id>"
+
+START_RESPONSE=$(curl -sS -X POST "http://localhost:7071/api/query" \
+  -H "Content-Type: application/json" \
+  -H "x-mag-trace-id: ${TRACE_ID}" \
+  --data-binary @- <<JSON
+{
+  "doc_id": "${DOC_ID}",
+  "question": "מי החשודה המרכזית בתיק ומה מיוחס לה?"
+}
+JSON
+)
+
+echo "$START_RESPONSE" | jq
+INSTANCE_ID=$(echo "$START_RESPONSE" | jq -r '.id // empty')
+```
+
+Poll the query Durable instance:
+
+```bash
+curl -sS "http://localhost:7071/api/pipelines/${INSTANCE_ID}" \
+  -H "x-mag-trace-id: lookup-${INSTANCE_ID}" \
+  | jq
+```
+
+Trace the full query-agent execution. Use `TRACE_ID` for LangGraph events because only the outer Durable start event carries the Durable `INSTANCE_ID`:
+
+```bash
+docker compose logs --tail=1000 function-app \
+  | rg "\[OBS\].*${TRACE_ID}" \
+  | sed -E 's/^.*\[OBS\] //' \
+  | jq
+```
+
+Show only LangGraph routing/tool events:
+
+```bash
+docker compose logs --tail=1000 function-app \
+  | rg "\[OBS\].*query\.langgraph.*${TRACE_ID}" \
+  | sed -E 's/^.*\[OBS\] //' \
+  | jq
+```
+
+### Expected Pipeline Events
+
+- `pipeline.started`
+- `pipeline.orchestrator_started`
+- `pipeline.chunking.completed`
+- `pipeline.extraction.chunk_completed`
+- `pipeline.merge.completed`
+- `pipeline.final_indexing.completed`
+- `pipeline.completed`
+- `pipeline.failed`
+- `protocol_completeness.generated`
+- metric events such as `pipeline_start_count`, `pipeline_success_count`, `pipeline_failure_count`
+
+### Expected Query Events
+
+- `query.started`
+- `query.orchestrator_started`
+- `query.langgraph.node.started`
+- `query.langgraph.plan.created`
+- `query.langgraph.route.selected`
+- `query.langgraph.doc_search.executed`
+- `query.langgraph.graph_action.selected`
+- `query.langgraph.synthesis.completed`
+- `query.langgraph.extraction.completed`
+- `query.langgraph.hitl.pending`
+- `query.langgraph.hitl.processed`
+- `query.langgraph.finalized`
+- `query.completed`
+- `query.failed`
+- metric events such as `query_success_count`, `query_duration_ms`, `query_failure_count`
+
+### App Insights Lookup
+
+```kusto
+let target_trace_id = "pipeline-or-query-trace-id";
+traces
+| where message has target_trace_id
+| order by timestamp asc
+```
+
+Structured-only view:
+
+```kusto
+let target_trace_id = "pipeline-or-query-trace-id";
+traces
+| where message startswith "[OBS] "
+| where message has target_trace_id
+| extend obs = parse_json(substring(message, 6))
+| project timestamp, event=tostring(obs.event), trace_id=tostring(obs.trace_id), doc_id=tostring(obs.doc_id), instance_id=tostring(obs.instance_id), obs
+| order by timestamp asc
+```
+
+---
+
+## Frontend
+
+The SPFx web part lives in [frontend/mag-spfx](frontend/mag-spfx/README.md). It supports mock mode and live Function App mode. Live mode sends `x-mag-trace-id` for pipeline upload/preflight/status and query start/status calls.
+
+```bash
+cd frontend/mag-spfx
+npm install
+npm run trust-cert
+npm run serve
+```
+
+---
+
+## Quality Checks
+
+Backend focused checks:
+
+```bash
+.venv/bin/ruff check function_app.py src tests
+.venv/bin/python -m pytest -q
+```
+
+Frontend type check:
+
+```bash
+cd frontend/mag-spfx
+./node_modules/.bin/tsc --noEmit
+```

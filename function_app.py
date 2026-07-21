@@ -22,6 +22,7 @@ from src.utils.config import settings
 from src.operations.dependency_checker import DependencyChecker
 from src.query_agent.query_agent import QueryAgent
 from src.models.models import SCHEMA_CONFIG  # noqa: F401 # Forces loading schema into memory cache during worker init
+from src.utils.observability import log_event, log_metric, trace_id_from_request
 
 # Initialize the Durable Functions App (Python V2 Model)
 app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -51,6 +52,58 @@ def _compact_error(exc: Exception | str, *, limit: int = 3000) -> str:
     if len(message) <= limit:
         return message
     return f"{message[:limit]}... [truncated; original length={len(message)} chars]"
+
+
+def _is_debug_logs_enabled() -> bool:
+    if os.getenv("MAG_ENABLE_DEBUG_LOGS", "").lower() in {"1", "true", "yes"}:
+        return True
+    return os.getenv("AZURE_FUNCTIONS_ENVIRONMENT", "").lower() in {"", "local", "development"}
+
+
+def _pipeline_input_payload(input_value: Any) -> Dict[str, Any]:
+    if isinstance(input_value, dict):
+        blob_path = str(input_value.get("blob_path") or input_value.get("blobPath") or "")
+        doc_id = str(input_value.get("doc_id") or input_value.get("docId") or "")
+        trace_id = str(input_value.get("trace_id") or input_value.get("traceId") or "")
+    else:
+        blob_path = str(input_value or "")
+        doc_id = ""
+        trace_id = ""
+    doc_id = doc_id or os.path.splitext(os.path.basename(blob_path))[0]
+    return {
+        "blob_path": blob_path,
+        "doc_id": doc_id,
+        "trace_id": trace_id,
+    }
+
+
+def _pipeline_status_payload(
+    *,
+    phase: str,
+    message: str,
+    blob_path: str,
+    doc_id: str,
+    trace_id: str,
+    total_chunks: int,
+    completed_chunks: int,
+    current_batch: int,
+    last_error: str | None,
+) -> Dict[str, Any]:
+    return {
+        "phase": phase,
+        "message": message,
+        "blob_path": blob_path,
+        "doc_id": doc_id,
+        "trace_id": trace_id,
+        "total_chunks": total_chunks,
+        "completed_chunks": completed_chunks,
+        "current_batch": current_batch,
+        "last_error": last_error,
+    }
+
+
+def _durable_instance_id(context: Any) -> str:
+    return str(getattr(context, "instance_id", "") or getattr(context, "instanceId", "") or "")
 
 
 def _doc_id_from_filename(filename: str) -> str:
@@ -383,6 +436,9 @@ def ping(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="debug_logs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 def debug_logs(req: func.HttpRequest) -> func.HttpResponse:
+    if not _is_debug_logs_enabled():
+        return func.HttpResponse("Debug logs endpoint is disabled.", status_code=404)
+
     import glob
     
     logs = []
@@ -437,14 +493,35 @@ async def health_check(req: func.HttpRequest) -> func.HttpResponse:
     Deep health check that verifies connectivity to all critical dependencies:
     Storage, Config, OpenAI, Cosmos DB, Search, and Document Intelligence.
     """
+    trace_id = trace_id_from_request(req, prefix="health")
+    started_at = time.perf_counter()
     result = await DependencyChecker().check_all(include_optional=True)
     health_status = {
         **result,
         "timestamp": uuid.uuid4().hex,
         "environment": os.getenv("AZURE_FUNCTIONS_ENVIRONMENT", "local"),
+        "trace_id": trace_id,
     }
 
     status_code = 200 if health_status["status"] != "Unhealthy" else 503
+    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+    log_event(
+        "health.checked",
+        trace_id=trace_id,
+        status=health_status["status"],
+        duration_ms=elapsed_ms,
+        dependency_count=len(health_status.get("dependencies", {})),
+    )
+    log_metric("health_check_duration_ms", elapsed_ms, unit="ms", status=health_status["status"])
+    for dep_name, dep in (health_status.get("dependencies") or {}).items():
+        log_metric(
+            "dependency_probe_latency_ms",
+            dep.get("latency_ms", 0),
+            unit="ms",
+            dependency=dep_name,
+            status=dep.get("status"),
+            required=dep.get("required"),
+        )
     return func.HttpResponse(
         json.dumps(health_status, indent=2),
         status_code=status_code,
@@ -688,6 +765,8 @@ async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestr
     Production-ready asynchronous pipeline entry point.
     Starts the orchestration and returns the instance ID.
     """
+    trace_id = trace_id_from_request(req, prefix="pipeline")
+    started_at = time.perf_counter()
     # 1. Validation
     MAX_SIZE_BYTES = 50 * 1024 * 1024
     file_bytes = req.get_body()
@@ -711,6 +790,14 @@ async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestr
     try:
         duplicate = await _case_duplicate_preflight(filename)
         if duplicate.get("status") == "duplicate":
+            log_event(
+                "pipeline.duplicate",
+                trace_id=trace_id,
+                doc_id=duplicate.get("doc_id"),
+                matched_doc_id=duplicate.get("matched_doc_id"),
+                matched_by=duplicate.get("matched_by"),
+            )
+            log_metric("pipeline_duplicate_count", 1, doc_id=duplicate.get("doc_id"))
             logging.info(
                 "[HTTP][PIPELINE_START][DUPLICATE] filename=%s doc_id=%s matched_doc_id=%s matched_by=%s",
                 filename,
@@ -720,6 +807,15 @@ async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestr
             )
             return _json_response(duplicate)
     except Exception as exc:
+        log_event(
+            "pipeline.preflight_failed",
+            level=logging.ERROR,
+            trace_id=trace_id,
+            doc_id=_doc_id_from_filename(filename),
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
+        log_metric("pipeline_failure_count", 1, phase="preflight")
         logging.error(
             "[HTTP][PIPELINE_START][PREFLIGHT_ERROR] filename=%s error=%s",
             filename,
@@ -732,11 +828,26 @@ async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestr
         )
     
     blob_path = f"uploads/{filename}"
+    doc_id = _doc_id_from_filename(filename)
     store = get_artifact_store()
     store.write_bytes(blob_path, file_bytes)
 
     # 3. Start Orchestration
-    instance_id = await client.start_new("pipeline_orchestrator", client_input=blob_path)
+    instance_id = await client.start_new(
+        "pipeline_orchestrator",
+        client_input={"blob_path": blob_path, "doc_id": doc_id, "trace_id": trace_id},
+    )
+    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+    log_event(
+        "pipeline.started",
+        trace_id=trace_id,
+        instance_id=instance_id,
+        doc_id=doc_id,
+        blob_path=blob_path,
+        file_size_bytes=len(file_bytes),
+        duration_ms=elapsed_ms,
+    )
+    log_metric("pipeline_start_count", 1, doc_id=doc_id)
     
     logging.info(f"[HTTP] Started orchestration for {blob_path}. ID: {instance_id}")
     
@@ -745,13 +856,32 @@ async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestr
 
 @app.route(route="pipeline-preflight", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
 async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpResponse:
+    trace_id = trace_id_from_request(req, prefix="pipeline-preflight")
     filename = req.params.get("filename") or req.params.get("doc_id") or ""
     if not filename:
         return func.HttpResponse("Missing query parameter: filename", status_code=400)
 
     try:
-        return _json_response(await _case_duplicate_preflight(filename))
+        result = await _case_duplicate_preflight(filename)
+        result["trace_id"] = trace_id
+        log_event(
+            "pipeline.preflight_checked",
+            trace_id=trace_id,
+            doc_id=result.get("doc_id"),
+            status=result.get("status"),
+            matched_doc_id=result.get("matched_doc_id"),
+            matched_by=result.get("matched_by"),
+        )
+        return _json_response(result)
     except Exception as exc:
+        log_event(
+            "pipeline.preflight_failed",
+            level=logging.ERROR,
+            trace_id=trace_id,
+            doc_id=_doc_id_from_filename(filename),
+            error_type=type(exc).__name__,
+            error=str(exc),
+        )
         logging.error(
             "[HTTP][PIPELINE_PREFLIGHT][ERROR] filename=%s error=%s",
             filename,
@@ -852,62 +982,75 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
     - Parallel Process: Extract entities/relationships from each chunk (Fan-Out).
     - Reduce: Merge results into a unified graph (Fan-In).
     """
-    blob_path: str = context.get_input()
-    doc_id = os.path.splitext(os.path.basename(blob_path))[0]
+    pipeline_input = _pipeline_input_payload(context.get_input())
+    blob_path = pipeline_input["blob_path"]
+    doc_id = pipeline_input["doc_id"]
+    trace_id = pipeline_input["trace_id"]
     total_chunks = 0
     completed_chunks = 0
     current_batch = 0
 
     if not context.is_replaying:
+        log_event(
+            "pipeline.orchestrator_started",
+            trace_id=trace_id,
+            doc_id=doc_id,
+            blob_path=blob_path,
+            instance_id=_durable_instance_id(context),
+        )
         logging.info(f"[ORCHESTRATOR][START] Processing blob: {blob_path}")
 
     try:
         context.set_custom_status(
-            {
-                "phase": "preflight",
-                "message": "Validating runtime dependencies",
-                "blob_path": blob_path,
-                "doc_id": doc_id,
-                "total_chunks": 0,
-                "completed_chunks": 0,
-                "current_batch": 0,
-                "last_error": None,
-            }
+            _pipeline_status_payload(
+                phase="preflight",
+                message="Validating runtime dependencies",
+                blob_path=blob_path,
+                doc_id=doc_id,
+                trace_id=trace_id,
+                total_chunks=0,
+                completed_chunks=0,
+                current_batch=0,
+                last_error=None,
+            )
         )
         yield context.call_activity("activity_preflight_check", None)
 
         context.set_custom_status(
-            {
-                "phase": "chunking",
-                "message": "Extracting document text and materializing chunks",
-                "blob_path": blob_path,
-                "doc_id": doc_id,
-                "total_chunks": 0,
-                "completed_chunks": 0,
-                "current_batch": 0,
-                "last_error": None,
-            }
+            _pipeline_status_payload(
+                phase="chunking",
+                message="Extracting document text and materializing chunks",
+                blob_path=blob_path,
+                doc_id=doc_id,
+                trace_id=trace_id,
+                total_chunks=0,
+                completed_chunks=0,
+                current_batch=0,
+                last_error=None,
+            )
         )
         chunk_meta: Dict[str, Any] = yield context.call_activity("activity_chunking", blob_path)
 
         if not chunk_meta or chunk_meta.get("total_chunks", 0) == 0:
             logging.warning(f"[ORCHESTRATOR][END] No chunks materialized for {blob_path}. Ending orchestration.")
             context.set_custom_status(
-                {
-                    "phase": "completed",
-                    "message": "No chunks were produced",
-                    "blob_path": blob_path,
-                    "doc_id": doc_id,
-                    "total_chunks": 0,
-                    "completed_chunks": 0,
-                    "current_batch": 0,
-                    "last_error": None,
-                }
+                _pipeline_status_payload(
+                    phase="completed",
+                    message="No chunks were produced",
+                    blob_path=blob_path,
+                    doc_id=doc_id,
+                    trace_id=trace_id,
+                    total_chunks=0,
+                    completed_chunks=0,
+                    current_batch=0,
+                    last_error=None,
+                )
             )
             return {
                 "status": "completed_no_content",
                 "blob_path": blob_path,
                 "final_graph_path": None,
+                "trace_id": trace_id,
             }
 
         batch_size = max(1, int(settings.orchestrator_extract_batch_size))
@@ -918,16 +1061,17 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
 
         for batch_index, batch in enumerate(batches, start=1):
             context.set_custom_status(
-                {
-                    "phase": "extracting",
-                    "message": f"Extracting batch {batch_index} of {len(batches)}",
-                    "blob_path": blob_path,
-                    "doc_id": doc_id,
-                    "total_chunks": total_chunks,
-                    "completed_chunks": completed_chunks,
-                    "current_batch": batch_index,
-                    "last_error": None,
-                }
+                _pipeline_status_payload(
+                    phase="extracting",
+                    message=f"Extracting batch {batch_index} of {len(batches)}",
+                    blob_path=blob_path,
+                    doc_id=doc_id,
+                    trace_id=trace_id,
+                    total_chunks=total_chunks,
+                    completed_chunks=completed_chunks,
+                    current_batch=batch_index,
+                    last_error=None,
+                )
             )
             current_batch = batch_index
             extraction_tasks = [
@@ -938,87 +1082,116 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
             extraction_results.extend(batch_result_payloads)
             completed_chunks = len(extraction_results)
             context.set_custom_status(
-                {
-                    "phase": "extracting",
-                    "message": f"Completed batch {batch_index} of {len(batches)}",
-                    "blob_path": blob_path,
-                    "doc_id": doc_id,
-                    "total_chunks": total_chunks,
-                    "completed_chunks": completed_chunks,
-                    "current_batch": current_batch,
-                    "last_error": None,
-                }
+                _pipeline_status_payload(
+                    phase="extracting",
+                    message=f"Completed batch {batch_index} of {len(batches)}",
+                    blob_path=blob_path,
+                    doc_id=doc_id,
+                    trace_id=trace_id,
+                    total_chunks=total_chunks,
+                    completed_chunks=completed_chunks,
+                    current_batch=current_batch,
+                    last_error=None,
+                )
             )
 
         context.set_custom_status(
-            {
-                "phase": "merging",
-                "message": "Merging partial graph extractions",
-                "blob_path": blob_path,
-                "doc_id": doc_id,
-                "total_chunks": total_chunks,
-                "completed_chunks": completed_chunks,
-                "current_batch": current_batch,
-                "last_error": None,
-            }
+            _pipeline_status_payload(
+                phase="merging",
+                message="Merging partial graph extractions",
+                blob_path=blob_path,
+                doc_id=doc_id,
+                trace_id=trace_id,
+                total_chunks=total_chunks,
+                completed_chunks=completed_chunks,
+                current_batch=current_batch,
+                last_error=None,
+            )
         )
         merged_graph_path: str = yield context.call_activity(
             "activity_merge_partials", extraction_results
         )
 
         context.set_custom_status(
-            {
-                "phase": "indexing",
-                "message": "Saving graph and updating downstream indexes",
-                "blob_path": blob_path,
-                "doc_id": doc_id,
-                "total_chunks": total_chunks,
-                "completed_chunks": completed_chunks,
-                "current_batch": current_batch,
-                "last_error": None,
-            }
+            _pipeline_status_payload(
+                phase="indexing",
+                message="Saving graph and updating downstream indexes",
+                blob_path=blob_path,
+                doc_id=doc_id,
+                trace_id=trace_id,
+                total_chunks=total_chunks,
+                completed_chunks=completed_chunks,
+                current_batch=current_batch,
+                last_error=None,
+            )
         )
         final_path: str = yield context.call_activity(
             "activity_final_indexing", merged_graph_path
         )
 
         if not context.is_replaying:
+            log_event(
+                "pipeline.completed",
+                trace_id=trace_id,
+                doc_id=doc_id,
+                instance_id=_durable_instance_id(context),
+                total_chunks=total_chunks,
+                completed_chunks=completed_chunks,
+                final_graph_path=final_path,
+            )
+            log_metric("pipeline_success_count", 1, doc_id=doc_id)
+            log_metric("pipeline_chunks_total", total_chunks, doc_id=doc_id)
             logging.info(
                 f"[ORCHESTRATOR][COMPLETE] Pipeline finished. Final graph: {final_path}"
             )
 
         context.set_custom_status(
-            {
-                "phase": "completed",
-                "message": "Pipeline completed",
-                "blob_path": blob_path,
-                "doc_id": doc_id,
-                "total_chunks": total_chunks,
-                "completed_chunks": completed_chunks,
-                "current_batch": current_batch,
-                "last_error": None,
-            }
+            _pipeline_status_payload(
+                phase="completed",
+                message="Pipeline completed",
+                blob_path=blob_path,
+                doc_id=doc_id,
+                trace_id=trace_id,
+                total_chunks=total_chunks,
+                completed_chunks=completed_chunks,
+                current_batch=current_batch,
+                last_error=None,
+            )
         )
         return {
             "status": "completed",
             "blob_path": blob_path,
             "final_graph_path": final_path,
+            "trace_id": trace_id,
         }
     except Exception as exc:
         import traceback
+        if not context.is_replaying:
+            log_event(
+                "pipeline.failed",
+                level=logging.ERROR,
+                trace_id=trace_id,
+                doc_id=doc_id,
+                instance_id=_durable_instance_id(context),
+                phase="failed",
+                error_type=type(exc).__name__,
+                error=_compact_error(exc),
+            )
+            log_metric("pipeline_failure_count", 1, doc_id=doc_id)
         logging.error(f"[CRITICAL][ORCHESTRATOR] Pipeline failed: {str(exc)}")
         logging.error(traceback.format_exc())
         context.set_custom_status(
-            {
-                "phase": "failed",
-                "message": "Pipeline failed",
-                "blob_path": blob_path,
-                "doc_id": doc_id,
-                "total_chunks": total_chunks,
-                "completed_chunks": completed_chunks,
-                "current_batch": current_batch,
-                "last_error": _compact_error(exc),
-            }
+            _pipeline_status_payload(
+                phase="failed",
+                message="Pipeline failed",
+                blob_path=blob_path,
+                doc_id=doc_id,
+                trace_id=trace_id,
+                total_chunks=total_chunks,
+                completed_chunks=completed_chunks,
+                current_batch=current_batch,
+                last_error=_compact_error(exc),
+            )
         )
         try:
             yield context.call_activity("activity_cleanup_failed_run", {"doc_id": doc_id})
@@ -1053,15 +1226,28 @@ async def activity_preflight_check(unused: Any) -> dict:
 @app.activity_trigger(input_name="blobPath")
 async def activity_chunking(blobPath: str) -> Dict[str, Any]:
     """Wraps the chunking logic. Input: blob path, Output: chunk metadata dict."""
+    started_at = time.perf_counter()
+    doc_id = os.path.splitext(os.path.basename(blobPath))[0]
     logging.info(f"[ACTIVITY][CHUNKING][START] Processing: {blobPath}")
     try:
         chunk_meta = await pipeline_activities.activity_chunking(blobPath)
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        log_event(
+            "pipeline.chunking.completed",
+            doc_id=doc_id,
+            blob_path=blobPath,
+            duration_ms=elapsed_ms,
+            total_chunks=chunk_meta.get("total_chunks", 0),
+        )
+        log_metric("pipeline_chunking_duration_ms", elapsed_ms, unit="ms", doc_id=doc_id)
+        log_metric("pipeline_chunks_total", chunk_meta.get("total_chunks", 0), doc_id=doc_id)
         logging.info(
             f"[ACTIVITY][CHUNKING][END] Chunks generated: {chunk_meta.get('total_chunks', 0)}"
         )
         return chunk_meta
     except Exception as e:
         import traceback
+        log_metric("pipeline_failure_count", 1, phase="chunking", doc_id=doc_id)
         error_msg = _compact_error(
             f"Error in activity_chunking: {type(e).__name__} - {e}"
         )
@@ -1073,16 +1259,27 @@ async def activity_chunking(blobPath: str) -> Dict[str, Any]:
 @app.activity_trigger(input_name="chunk")
 async def activity_extract_chunk(chunk: Dict[str, Any]) -> Dict[str, Any]:
     """Extracts entities from a single chunk in-memory. Input: chunk dict/reference, Output: extraction result dict."""
+    started_at = time.perf_counter()
+    doc_id = str(chunk.get("doc_id") or "unknown")
     chunk_idx = chunk.get("chunk_index", "unknown") if "text" in chunk else chunk.get("chunk_id", "unknown")
     logging.info(f"[ACTIVITY][EXTRACT_CHUNK][START] Chunk: {chunk_idx}")
     try:
         result_payload = await pipeline_activities.activity_extract_chunk(chunk)
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        log_event(
+            "pipeline.extraction.chunk_completed",
+            doc_id=doc_id,
+            chunk_id=chunk_idx,
+            duration_ms=elapsed_ms,
+        )
+        log_metric("pipeline_extraction_duration_ms", elapsed_ms, unit="ms", doc_id=doc_id)
         logging.info(
             f"[ACTIVITY][EXTRACT_CHUNK][END] Extraction complete for chunk: {chunk_idx}"
         )
         return result_payload
     except Exception as e:
         import traceback
+        log_metric("pipeline_failure_count", 1, phase="extracting", doc_id=doc_id)
         error_msg = _compact_error(
             f"Error in activity_extract_chunk: {type(e).__name__} - {e}"
         )
@@ -1100,6 +1297,8 @@ async def activity_merge_partials(
         logging.warning("[ACTIVITY][MERGE_PARTIALS] Received empty or None extractions. Skipping merge.")
         return None
 
+    started_at = time.perf_counter()
+    doc_id = str((extractions[0] or {}).get("doc_id") or "unknown")
     logging.info(
         f"[ACTIVITY][MERGE_PARTIALS][START] Merging {len(extractions)} results in-memory."
     )
@@ -1107,12 +1306,22 @@ async def activity_merge_partials(
         merged_graph_path = await pipeline_activities.activity_merge_partials(
             extractions
         )
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        log_event(
+            "pipeline.merge.completed",
+            doc_id=doc_id,
+            extraction_count=len(extractions),
+            merged_graph_path=merged_graph_path,
+            duration_ms=elapsed_ms,
+        )
+        log_metric("pipeline_merge_duration_ms", elapsed_ms, unit="ms", doc_id=doc_id)
         logging.info(
             f"[ACTIVITY][MERGE_PARTIALS][END] Merged graph materialized to: {merged_graph_path}"
         )
         return merged_graph_path
     except Exception as e:
         import traceback
+        log_metric("pipeline_failure_count", 1, phase="merging", doc_id=doc_id)
         error_msg = _compact_error(
             f"Error in activity_merge_partials: {type(e).__name__} - {e}"
         )
@@ -1124,15 +1333,28 @@ async def activity_merge_partials(
 @app.activity_trigger(input_name="mergedGraphPath")
 async def activity_final_indexing(mergedGraphPath: str) -> str:
     """Performs final indexing and cleanup. Input: merged graph path, Output: final graph path (cosmos_uri)."""
+    started_at = time.perf_counter()
+    parts = str(mergedGraphPath or "").split("/")
+    doc_id = parts[1] if len(parts) > 2 and parts[0] == "graph" else "unknown"
     logging.info(
         f"[ACTIVITY][FINAL_INDEXING][START] Indexing graph from: {mergedGraphPath}"
     )
     try:
         final_path = await pipeline_activities.activity_final_indexing(mergedGraphPath)
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        log_event(
+            "pipeline.final_indexing.completed",
+            doc_id=doc_id,
+            merged_graph_path=mergedGraphPath,
+            final_graph_path=final_path,
+            duration_ms=elapsed_ms,
+        )
+        log_metric("pipeline_final_indexing_duration_ms", elapsed_ms, unit="ms", doc_id=doc_id)
         logging.info(f"[ACTIVITY][FINAL_INDEXING][END] Final graph indexing complete: {final_path}")
         return final_path
     except Exception as e:
         import traceback
+        log_metric("pipeline_failure_count", 1, phase="indexing", doc_id=doc_id)
         error_msg = _compact_error(
             f"Error in activity_final_indexing: {type(e).__name__} - {e}"
         )
@@ -1170,24 +1392,41 @@ async def start_query_async(req: func.HttpRequest, client: df.DurableOrchestrati
     Stateless investigative query entry point.
     Starts the query orchestration and returns status check details.
     """
+    trace_id = trace_id_from_request(req, prefix="query")
+    started_at = time.perf_counter()
     try:
         req_body = req.get_json()
     except ValueError:
         return func.HttpResponse("Invalid JSON body.", status_code=400)
 
-    question = req_body.get("question")
+    question = req_body.get("question") or ""
     doc_id = req_body.get("doc_id")
     state = req_body.get("state")
 
-    if not question:
+    if not question and not state:
         return func.HttpResponse("Missing required field: question", status_code=400)
     if not doc_id:
         return func.HttpResponse("Missing required field: doc_id", status_code=400)
 
     instance_id = await client.start_new(
         "query_orchestrator", 
-        client_input={"question": question, "doc_id": doc_id, "state": state}
+        client_input={
+            "question": question,
+            "doc_id": doc_id,
+            "state": state,
+            "trace_id": trace_id,
+        }
     )
+    elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+    log_event(
+        "query.started",
+        trace_id=trace_id,
+        instance_id=instance_id,
+        doc_id=doc_id,
+        question_length=len(str(question)),
+        duration_ms=elapsed_ms,
+    )
+    log_metric("query_start_count", 1, doc_id=doc_id)
     
     logging.info(f"[HTTP] Started query orchestration for doc_id {doc_id}. ID: {instance_id}")
     return client.create_check_status_response(req, instance_id)
@@ -1200,13 +1439,57 @@ def query_orchestrator(context: df.DurableOrchestrationContext):
     """
     query_input = context.get_input()
     if not context.is_replaying:
+        log_event(
+            "query.orchestrator_started",
+            trace_id=query_input.get("trace_id"),
+            doc_id=query_input.get("doc_id"),
+            instance_id=_durable_instance_id(context),
+        )
         logging.info(f"[ORCHESTRATOR][QUERY] Starting query orchestrator for doc_id: {query_input.get('doc_id')}")
 
     try:
+        context.set_custom_status(
+            {
+                "phase": "querying",
+                "message": "Answering investigative query",
+                "doc_id": query_input.get("doc_id"),
+                "trace_id": query_input.get("trace_id"),
+                "last_error": None,
+            }
+        )
         result = yield context.call_activity("activity_query_investigation", query_input)
+        context.set_custom_status(
+            {
+                "phase": "completed",
+                "message": "Query completed",
+                "doc_id": query_input.get("doc_id"),
+                "trace_id": query_input.get("trace_id"),
+                "last_error": None,
+            }
+        )
         return result
     except Exception as exc:
         import traceback
+        context.set_custom_status(
+            {
+                "phase": "failed",
+                "message": "Query failed",
+                "doc_id": query_input.get("doc_id"),
+                "trace_id": query_input.get("trace_id"),
+                "last_error": _compact_error(exc),
+            }
+        )
+        if not context.is_replaying:
+            log_event(
+                "query.failed",
+                level=logging.ERROR,
+                trace_id=query_input.get("trace_id"),
+                doc_id=query_input.get("doc_id"),
+                instance_id=_durable_instance_id(context),
+                error_type=type(exc).__name__,
+                error=_compact_error(exc),
+            )
+            log_metric("query_failure_count", 1, doc_id=query_input.get("doc_id"))
         logging.error(f"[CRITICAL][ORCHESTRATOR] Query orchestrator failed: {str(exc)}")
         logging.error(traceback.format_exc())
         raise exc
@@ -1218,21 +1501,48 @@ async def activity_query_investigation(queryInput: dict) -> dict:
     Stateless activity to route and answer an investigative query.
     Input format: {"question": str, "doc_id": str, "state": dict}
     """
-    question = queryInput["question"]
+    question = queryInput.get("question") or ""
     doc_id = queryInput["doc_id"]
     state_dict = queryInput.get("state")
+    trace_id = queryInput.get("trace_id")
+    started_at = time.perf_counter()
     
     logging.info(f"[ACTIVITY][QUERY][START] doc_id: {doc_id} | question: {question[:50]}...")
     try:
         async with QueryAgent(doc_id=doc_id, stateless=True) as agent:
-            result_state = await agent.answer_question_stateless(question, state_dict)
+            result_state = await agent.answer_question_stateless(question, state_dict, trace_id=trace_id)
+            elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+            answer = result_state.get("final_answer")
+            log_event(
+                "query.completed",
+                trace_id=trace_id,
+                doc_id=doc_id,
+                duration_ms=elapsed_ms,
+                answer_length=len(str(answer or "")),
+            )
+            log_metric("query_success_count", 1, doc_id=doc_id)
+            log_metric("query_duration_ms", elapsed_ms, unit="ms", doc_id=doc_id)
             logging.info(f"[ACTIVITY][QUERY][END] doc_id: {doc_id} query finished successfully.")
-            return {
+            payload = {
                 "state": result_state,
-                "answer": result_state.get("final_answer")
+                "answer": answer,
+                "trace_id": trace_id,
             }
+            json.dumps(payload, ensure_ascii=False)
+            return payload
     except Exception as e:
         import traceback
+        elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        log_event(
+            "query.failed",
+            level=logging.ERROR,
+            trace_id=trace_id,
+            doc_id=doc_id,
+            duration_ms=elapsed_ms,
+            error_type=type(e).__name__,
+            error=_compact_error(e),
+        )
+        log_metric("query_failure_count", 1, doc_id=doc_id)
         error_msg = _compact_error(
             f"Error in activity_query_investigation: {type(e).__name__} - {e}"
         )
