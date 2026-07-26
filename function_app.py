@@ -758,6 +758,50 @@ def get_case_completeness(req: func.HttpRequest) -> func.HttpResponse:
     )
 
 
+@app.route(route="cases/{docId}/completeness/verify", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.durable_client_input(client_name="client")
+async def verify_case_completeness_async(
+    req: func.HttpRequest, client: df.DurableOrchestrationClient
+) -> func.HttpResponse:
+    """
+    On-demand asynchronous verification of protocol completeness missing items using QueryAgent.
+    Returns HTTP 202 Accepted response with status check URI to prevent browser timeouts.
+    """
+    doc_id = req.route_params.get("docId")
+    if not doc_id:
+        return func.HttpResponse("Missing route parameter: docId", status_code=400)
+
+    trace_id = trace_id_from_request(req, prefix="completeness_verify")
+    instance_id = await client.start_new(
+        "completeness_verification_orchestrator",
+        client_input={
+            "doc_id": doc_id,
+            "trace_id": trace_id,
+            "critical_only": False,
+            "max_items": 15,
+        },
+    )
+    logging.info(
+        f"[HTTP][COMPLETENESS_VERIFY] Started verification orchestration for doc_id {doc_id}. Instance ID: {instance_id}"
+    )
+    return client.create_check_status_response(req, instance_id)
+
+
+@app.orchestration_trigger(context_name="context")
+def completeness_verification_orchestrator(context: df.DurableOrchestrationContext):
+    """
+    Durable Orchestrator to execute background protocol completeness agent verification.
+    """
+    input_data = context.get_input() or {}
+    doc_id = input_data.get("doc_id")
+    if not context.is_replaying:
+        logging.info(f"[ORCHESTRATOR][COMPLETENESS_VERIFY] Starting verification for doc_id: {doc_id}")
+
+    result = yield context.call_activity("activity_verify_protocol_completeness", input_data)
+    return result
+
+
+
 @app.route(route="pipelines", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
 @app.durable_client_input(client_name="client")
 async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
@@ -1378,6 +1422,25 @@ async def activity_cleanup_failed_run(payload: dict) -> None:
         logging.error(error_msg)
         logging.error(traceback.format_exc())
         raise RuntimeError(error_msg)
+
+
+@app.activity_trigger(input_name="payload")
+async def activity_verify_protocol_completeness(payload: dict) -> dict:
+    """Audits missing protocol items using QueryAgent / Azure Search. Input: {"doc_id": str}"""
+    logging.info(f"[ACTIVITY][VERIFY_COMPLETENESS][START] doc_id: {payload.get('doc_id')}")
+    try:
+        res = await pipeline_activities.activity_verify_protocol_completeness(payload)
+        logging.info(f"[ACTIVITY][VERIFY_COMPLETENESS][END] doc_id: {payload.get('doc_id')}")
+        return res or {}
+    except Exception as e:
+        import traceback
+        error_msg = _compact_error(
+            f"Error in activity_verify_protocol_completeness: {type(e).__name__} - {e}"
+        )
+        logging.error(error_msg)
+        logging.error(traceback.format_exc())
+        raise RuntimeError(error_msg)
+
 
 
 # --------------------------------------------------------------------------------

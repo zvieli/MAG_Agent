@@ -692,3 +692,59 @@ async def activity_cleanup_failed_run(payload: Dict[str, Any]) -> None:
             logging.info(f"[ACTIVITY][CLEANUP_FAILED_RUN] Dropped Gremlin partition for: {doc_id}")
         except Exception as e:
             logging.error(f"[ACTIVITY][CLEANUP_FAILED_RUN] Cosmos DB cleanup failed: {e}")
+
+
+async def activity_verify_protocol_completeness(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Background activity to audit missing protocol items via QueryAgent / Azure Search."""
+    from src.reporting.protocol_completeness import verify_missing_items_with_agent
+
+    doc_id = payload.get("doc_id")
+    critical_only = payload.get("critical_only", False)
+    max_items = payload.get("max_items", 10)
+
+    if not doc_id:
+        logging.warning("[ACTIVITY][VERIFY_COMPLETENESS] Missing doc_id in payload.")
+        return {}
+
+    logging.info(f"[ACTIVITY][VERIFY_COMPLETENESS] Starting background verification for doc_id: {doc_id}")
+    store = _get_artifact_store()
+    path = f"graph/{doc_id}/protocol_completeness.json"
+
+    if not await asyncio.to_thread(store.exists, path):
+        path = "protocol_completeness.json"
+
+    if not await asyncio.to_thread(store.exists, path):
+        logging.warning(f"[ACTIVITY][VERIFY_COMPLETENESS] protocol_completeness.json not found for doc_id: {doc_id}")
+        return {}
+
+    try:
+        raw_bytes = await asyncio.to_thread(store.read_bytes, path)
+        report = json.loads(raw_bytes.decode("utf-8"))
+
+        search_mgr = None
+        try:
+            from src.storage.factory import get_search_manager
+
+            search_mgr = get_search_manager()
+        except Exception as search_exc:
+            logging.warning(f"[ACTIVITY][VERIFY_COMPLETENESS] SearchManager unavailable: {search_exc}")
+
+        updated_report = await verify_missing_items_with_agent(
+            report=report,
+            doc_id=doc_id,
+            search_manager=search_mgr,
+            max_items=max_items,
+            critical_only=critical_only,
+        )
+
+        updated_bytes = json.dumps(updated_report, ensure_ascii=False, indent=2).encode("utf-8")
+        await asyncio.to_thread(store.write_bytes, f"graph/{doc_id}/protocol_completeness.json", updated_bytes)
+        await asyncio.to_thread(store.write_bytes, "graph/latest/protocol_completeness.json", updated_bytes)
+        await asyncio.to_thread(store.write_bytes, "protocol_completeness.json", updated_bytes)
+
+        logging.info(f"[ACTIVITY][VERIFY_COMPLETENESS] Successfully updated protocol completeness for doc_id: {doc_id}")
+        return updated_report
+    except Exception as exc:
+        logging.error(f"[ACTIVITY][VERIFY_COMPLETENESS] Verification failed for doc_id {doc_id}: {exc}", exc_info=True)
+        return {}
+

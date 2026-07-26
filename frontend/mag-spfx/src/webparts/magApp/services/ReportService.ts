@@ -70,4 +70,25 @@ export class ReportService implements IReportService {
     await browserCache.set(cacheKey, result, reportTtlMs);
     return { ...result, cache: { fromCache: false } };
   }
+
+  public async verifyProtocolCompletenessWithAgent(docId: string): Promise<string> {
+    const response = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness/verify`), {
+      method: 'POST',
+      headers: authHeaders(this.functionKey)
+    });
+    if (!response.ok) {
+      throw new Error(`Verification request failed: ${response.statusText}`);
+    }
+    const data = await response.json();
+    return data.statusQueryGetUri || data.status_uri || '';
+  }
+
+  public async checkVerificationStatus(statusUrl: string): Promise<{ runtimeStatus: string }> {
+    const response = await fetch(statusUrl);
+    if (!response.ok) {
+      throw new Error(`Status query failed: ${response.statusText}`);
+    }
+    return response.json();
+  }
 }
+

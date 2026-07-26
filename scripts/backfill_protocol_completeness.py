@@ -270,11 +270,25 @@ async def run_backfill(args: argparse.Namespace) -> dict[str, Any]:
         raw_text=raw_text,
         doc_id=args.doc_id,
     )
+
+    if getattr(args, "verify_with_agent", False):
+        from src.reporting.protocol_completeness import verify_missing_items_with_agent
+
+        report = await verify_missing_items_with_agent(
+            report=report,
+            doc_id=args.doc_id,
+            raw_text=raw_text,
+            search_manager=search_mgr,
+            max_items=args.agent_max_items,
+            critical_only=args.agent_critical_only,
+        )
+
     report["source"] = "backfill"
     report["backfill"] = {
         "generatedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
         "graph": graph_data.get("metadata", {}),
         "search": search_metadata,
+        "verifiedWithAgent": bool(getattr(args, "verify_with_agent", False)),
     }
 
     store = _artifact_store(args.output, args.container)
@@ -308,8 +322,20 @@ def parse_args() -> argparse.Namespace:
         default=20,
         help="Stop after this many consecutive missing chunk IDs.",
     )
+    parser.add_argument(
+        "--verify-with-agent",
+        action="store_true",
+        help="Run QueryAgent grounded verification on missing items after deterministic check.",
+    )
+    parser.add_argument("--agent-max-items", type=int, default=10, help="Max items to verify with agent.")
+    parser.add_argument(
+        "--agent-critical-only",
+        action="store_true",
+        help="Only verify missing items with severity=critical.",
+    )
     parser.add_argument("--verbose", action="store_true", help="Enable debug logging.")
     return parser.parse_args()
+
 
 
 def main() -> None:

@@ -26,7 +26,10 @@ export interface IReportService {
   getReport(docId: string, options?: { forceRefresh?: boolean }): Promise<ReportResult>;
   getCommunitySummaries(docId: string, options?: { forceRefresh?: boolean }): Promise<CommunitySummariesResult>;
   getProtocolCompleteness(docId: string, options?: { forceRefresh?: boolean }): Promise<ProtocolCompletenessResult>;
+  verifyProtocolCompletenessWithAgent(docId: string): Promise<string>;
+  checkVerificationStatus(statusUrl: string): Promise<{ runtimeStatus: string }>;
 }
+
 
 export interface ITimelineService {
   getTimeline(docId: string, options?: { forceRefresh?: boolean }): Promise<TimelineResult>;

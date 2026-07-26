@@ -1,10 +1,11 @@
-import { DefaultButton, Spinner, Pivot, PivotItem } from '@fluentui/react';
+import { DefaultButton, PrimaryButton, Spinner, Pivot, PivotItem } from '@fluentui/react';
 import * as React from 'react';
 import { MarkdownView } from '../components/MarkdownView';
 import styles from '../components/MagApp.module.scss';
 import { CommunitySummariesResult, ProtocolCompletenessItem, ProtocolCompletenessResult, ReportResult } from '../domain/types';
 import { IReportService } from '../services/IAppServices';
 import { errorText, sourceLabel } from '../domain/localization';
+
 
 export interface ReportPageProps {
   docId?: string;
@@ -164,8 +165,11 @@ const statusStyle = (status: string): React.CSSProperties => {
 };
 
 const evidenceStrengthLabel = (strength?: string): string => {
+  if (strength === 'agent_verified') {
+    return 'אותר ע"י סוכן חכם';
+  }
   if (strength === 'strong') {
-    return 'ראיה חזקה';
+    return 'אינדיקציה חזקה';
   }
   if (strength === 'weak') {
     return 'אינדיקציה חלקית';
@@ -174,6 +178,9 @@ const evidenceStrengthLabel = (strength?: string): string => {
 };
 
 const evidenceStrengthStyle = (strength?: string): React.CSSProperties => {
+  if (strength === 'agent_verified') {
+    return { backgroundColor: '#e0f2fe', color: '#0369a1', borderColor: '#7dd3fc' };
+  }
   if (strength === 'strong') {
     return { backgroundColor: '#ecfdf5', color: '#166534', borderColor: '#bbf7d0' };
   }
@@ -198,6 +205,8 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
   const [completeness, setCompleteness] = React.useState<ProtocolCompletenessResult | undefined>();
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | undefined>();
+  const [verifyingAgent, setVerifyingAgent] = React.useState(false);
+  const [verificationMessage, setVerificationMessage] = React.useState<string | undefined>();
 
   const loadReport = React.useCallback((forceRefresh = false): void => {
     if (!docId) return;
@@ -218,9 +227,55 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
       .then(() => setLoading(false));
   }, [docId, reportService]);
 
+  const triggerAgentVerification = React.useCallback(async () => {
+    if (!docId) return;
+    setVerifyingAgent(true);
+    setVerificationMessage('מפעיל אימות סוכן חכם ברקע...');
+    try {
+      const statusUrl = await reportService.verifyProtocolCompletenessWithAgent(docId);
+      if (!statusUrl) {
+        setVerificationMessage('אימות הסוכן הופעל.');
+        loadReport(true);
+        setVerifyingAgent(false);
+        return;
+      }
+
+      const startTime = Date.now();
+      const pollInterval = setInterval(async () => {
+        try {
+          if (Date.now() - startTime > 120000) {
+            clearInterval(pollInterval);
+            setVerifyingAgent(false);
+            setVerificationMessage('אימות הסוכן מתמשך ברקע.');
+            loadReport(true);
+            return;
+          }
+          const status = await reportService.checkVerificationStatus(statusUrl);
+          const state = (status.runtimeStatus || '').toLowerCase();
+          if (state === 'completed' || state === 'failed' || state === 'terminated') {
+            clearInterval(pollInterval);
+            setVerifyingAgent(false);
+            setVerificationMessage(state === 'completed' ? 'אימות הסוכן הושלם בהצלחה!' : 'אימות הסוכן הסתיים.');
+            loadReport(true);
+          } else {
+            setVerificationMessage(`סוכן חכם סורק ומאמת חומר חקירה... (${status.runtimeStatus || 'בביצוע'})`);
+          }
+        } catch {
+          clearInterval(pollInterval);
+          setVerifyingAgent(false);
+          loadReport(true);
+        }
+      }, 2500);
+    } catch (err) {
+      setVerifyingAgent(false);
+      setVerificationMessage(err instanceof Error ? err.message : 'אירעה שגיאה בהפעלת אימות סוכן.');
+    }
+  }, [docId, reportService, loadReport]);
+
   React.useEffect(() => {
     loadReport();
   }, [loadReport]);
+
 
   if (!docId) {
     return <div className={styles.emptyState}>יש להשלים עיבוד תיק לפני פתיחת דו"ח הניתוח.</div>;
@@ -410,28 +465,44 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
                 <div className={styles.emptyState} style={{ padding: '24px' }}>לא נמצא דו"ח בקרת שלמות עבור התיק.</div>
               ) : (
                 <>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', marginBottom: '14px' }}>
-                    <div className={styles.graphMetric}>
-                      <span>כיסוי</span>
-                      <strong>{completenessSummary.coveragePercent || 0}%</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px', flex: '1 1 auto' }}>
+                      <div className={styles.graphMetric}>
+                        <span>כיסוי</span>
+                        <strong>{completenessSummary.coveragePercent || 0}%</strong>
+                      </div>
+                      <div className={styles.graphMetric}>
+                        <span>אותרו</span>
+                        <strong>{completenessSummary.present || 0}</strong>
+                      </div>
+                      <div className={styles.graphMetric}>
+                        <span>חסרים</span>
+                        <strong>{completenessSummary.missing || 0}</strong>
+                      </div>
+                      <div className={styles.graphMetric}>
+                        <span>בדיקות קריטיות</span>
+                        <strong>{completenessSummary.criticalReviewRequired || 0}</strong>
+                      </div>
+                      <div className={styles.graphMetric}>
+                        <span>מותנים</span>
+                        <strong>{completenessSummary.conditionalMissing || 0}</strong>
+                      </div>
                     </div>
-                    <div className={styles.graphMetric}>
-                      <span>אותרו</span>
-                      <strong>{completenessSummary.present || 0}</strong>
-                    </div>
-                    <div className={styles.graphMetric}>
-                      <span>חסרים</span>
-                      <strong>{completenessSummary.missing || 0}</strong>
-                    </div>
-                    <div className={styles.graphMetric}>
-                      <span>בדיקות קריטיות</span>
-                      <strong>{completenessSummary.criticalReviewRequired || 0}</strong>
-                    </div>
-                    <div className={styles.graphMetric}>
-                      <span>מותנים</span>
-                      <strong>{completenessSummary.conditionalMissing || 0}</strong>
+                    <div>
+                      <PrimaryButton
+                        text={verifyingAgent ? 'מאמת חוסרים...' : 'הפעל אימות סוכן חכם'}
+                        iconProps={{ iconName: 'Robot' }}
+                        onClick={triggerAgentVerification}
+                        disabled={verifyingAgent || loading}
+                      />
                     </div>
                   </div>
+                  {verificationMessage && (
+                    <div className={styles.reportOpinion} style={{ marginBottom: '14px', backgroundColor: '#e0f2fe', borderColor: '#0284c7', color: '#0369a1' }}>
+                      {verifyingAgent && <Spinner label={verificationMessage} labelPosition="right" style={{ display: 'inline-flex', marginRight: '8px' }} />}
+                      {!verifyingAgent && verificationMessage}
+                    </div>
+                  )}
                   {completeness.disclaimer && (
                     <div className={styles.reportOpinion} style={{ marginBottom: '14px' }}>
                       {completeness.disclaimer}
@@ -493,6 +564,26 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
                                 {item.reviewNote}
                               </div>
                             )}
+                            {item.agentVerification && (
+                              <div style={{
+                                marginTop: '10px',
+                                padding: '8px 10px',
+                                borderRight: '3px solid #0284c7',
+                                backgroundColor: '#f0f9ff',
+                                color: '#0c4a6e',
+                                fontSize: '12px',
+                                lineHeight: 1.45,
+                                borderRadius: '4px'
+                              }}>
+                                <strong>אימות סוכן חכם ({item.agentVerification.verifiedByAgent ? 'מאומת' : 'לא אותר'}): </strong>
+                                {item.agentVerification.explanation}
+                                {item.agentVerification.verbatimQuote && (
+                                  <div style={{ marginTop: '4px', fontStyle: 'italic', color: '#0369a1' }}>
+                                    "{item.agentVerification.verbatimQuote}" ({item.agentVerification.sourceLocation || 'חומר התיק'})
+                                  </div>
+                                )}
+                              </div>
+                            )}
                             {item.evidence?.[0] && (
                               <div style={{ marginTop: '10px', padding: '8px', borderRight: '3px solid #0f766e', backgroundColor: '#f0fdfa', color: '#134e4a', fontSize: '12px', lineHeight: 1.45 }}>
                                 <strong>{item.evidence[0].signal}: </strong>{item.evidence[0].snippet}
@@ -507,6 +598,7 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
               )}
             </div>
           </PivotItem>
+
 
           <PivotItem headerText='הדו"ח המלא'>
             <div style={{ marginTop: '16px' }}>

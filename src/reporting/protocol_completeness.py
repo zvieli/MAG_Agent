@@ -4,9 +4,11 @@ from __future__ import annotations
 
 from collections import Counter
 from datetime import UTC, datetime
+import json
 import logging
 import re
 from typing import Any
+
 
 
 logger = logging.getLogger(__name__)
@@ -452,3 +454,182 @@ def protocol_completeness_to_markdown(report: dict[str, Any]) -> str:
             lines.append(f"  - הערת בדיקה: {item.get('reviewNote')}")
 
     return "\n".join(lines)
+
+
+async def verify_missing_items_with_agent(
+    report: dict[str, Any],
+    doc_id: str,
+    raw_text: str = "",
+    search_manager: Any = None,
+    max_items: int = 10,
+    critical_only: bool = False,
+) -> dict[str, Any]:
+    """Audits missing/conditional protocol items using Azure AI Search & LLM grounded verification."""
+    from pathlib import Path
+
+    if not isinstance(report, dict):
+        return report
+
+    items = report.get("items") or []
+    if not items:
+        return report
+
+    target_items = [
+        item
+        for item in items
+        if item.get("status") in {STATUS_MISSING, STATUS_CONDITIONAL_MISSING}
+        and (not critical_only or item.get("severity") == "critical")
+    ][:max_items]
+
+    if not target_items:
+        return report
+
+    system_prompt = "You are a constrained investigation-file completeness classifier and auditor."
+    try:
+        prompt_path = Path(__file__).resolve().parents[2] / "prompts" / "protocol_completeness_system.md"
+        if prompt_path.exists():
+            system_prompt = prompt_path.read_text(encoding="utf-8")
+    except Exception as exc:
+        logger.warning("[PROTOCOL_COMPLETENESS] Could not read system prompt file: %s", exc)
+
+
+    try:
+        from src.query_agent.nodes import call_llm
+    except ImportError:
+        logger.warning("[PROTOCOL_COMPLETENESS] call_llm import failed, skipping agent verification.")
+        return report
+
+    updated_items = list(items)
+    item_map = {item.get("id"): idx for idx, item in enumerate(updated_items)}
+
+    for target in target_items:
+        item_id = target.get("id")
+        label = target.get("label") or item_id
+        description = target.get("description") or ""
+
+        candidate_snippets: list[dict[str, str]] = []
+
+        if search_manager and hasattr(search_manager, "search_chunks"):
+            try:
+                search_query = f"{label} {description}"
+                chunks = await search_manager.search_chunks(doc_id=doc_id, query=search_query, top=5)
+                for chunk in chunks:
+                    candidate_snippets.append({
+                        "text": chunk.get("chunk_text") or chunk.get("text") or "",
+                        "source_location": chunk.get("source_location") or chunk.get("id") or "raw_text",
+                    })
+            except Exception as search_err:
+                logger.warning("[PROTOCOL_COMPLETENESS] Search retrieval error for item %s: %s", item_id, search_err)
+
+        if not candidate_snippets and raw_text:
+            clean_raw = _clean_text(raw_text)
+            if clean_raw:
+                candidate_snippets.append({
+                    "text": clean_raw[:3000],
+                    "source_location": f"doc_{doc_id}_extracted.txt",
+                })
+
+        if not candidate_snippets:
+            continue
+
+        snippets_prompt = "\n---\n".join(
+            f"Source Location: {s['source_location']}\nText: {s['text']}"
+            for s in candidate_snippets
+        )
+
+        user_prompt = (
+            f"Checklist Item ID: {item_id}\n"
+            f"Checklist Item Label: {label}\n"
+            f"Checklist Item Description: {description}\n\n"
+            f"Candidate Material Snippets:\n{snippets_prompt}\n\n"
+            "Audit strictly according to system prompt rules. Return ONLY valid JSON."
+        )
+
+        try:
+            llm_response = await call_llm(system_prompt, user_prompt, max_tokens=600, temperature=0.0)
+            match_data = None
+            if "```json" in llm_response:
+                llm_response = llm_response.split("```json")[1].split("```")[0].strip()
+            elif "```" in llm_response:
+                llm_response = llm_response.split("```")[1].split("```")[0].strip()
+
+            parsed = json.loads(llm_response)
+            matches = parsed.get("matches") or []
+            if matches and isinstance(matches, list):
+                match_data = matches[0]
+
+            idx = item_map.get(item_id)
+            if idx is not None and match_data:
+                status_str = str(match_data.get("status", "")).lower()
+                verbatim_quote = _clean_text(match_data.get("verbatim_quote") or match_data.get("evidence_snippet") or "")
+                source_loc = match_data.get("source_location") or "case_material"
+                reason_text = match_data.get("reason") or ""
+
+                is_grounded = False
+                if verbatim_quote:
+                    verbatim_lower = verbatim_quote.casefold()
+                    for s in candidate_snippets:
+                        if verbatim_lower in s["text"].casefold():
+                            is_grounded = True
+                            source_loc = s["source_location"]
+                            break
+
+                if status_str == "found" and is_grounded:
+                    updated_items[idx]["status"] = STATUS_PRESENT
+                    updated_items[idx]["evidenceStrength"] = "agent_verified"
+                    updated_items[idx]["reason"] = f"אותר ואומת ע\"י סוכן חכם. {reason_text}".strip()
+                    updated_items[idx]["agentVerification"] = {
+                        "verifiedByAgent": True,
+                        "verbatimQuote": verbatim_quote,
+                        "sourceLocation": source_loc,
+                        "explanation": reason_text,
+                        "verifiedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                    }
+                    evidence_list = updated_items[idx].get("evidence") or []
+                    evidence_list.append({
+                        "source": "agent_verification",
+                        "signal": "agent_verified",
+                        "snippet": verbatim_quote,
+                        "strength": "strong",
+                        "matchType": "semantic",
+                    })
+                    updated_items[idx]["evidence"] = evidence_list
+                else:
+                    updated_items[idx]["agentVerification"] = {
+                        "verifiedByAgent": False,
+                        "explanation": reason_text or "נבדק ע\"י סוכן חכם ולא אותרה ראיה מפורשת בחומר התיק.",
+                        "verifiedAt": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+                    }
+        except Exception as llm_err:
+            logger.warning("[PROTOCOL_COMPLETENESS] LLM verification error for item %s: %s", item_id, llm_err)
+
+    counts = Counter(item["status"] for item in updated_items)
+    critical_missing = sum(
+        1 for item in updated_items
+        if item["severity"] == "critical" and item["status"] == STATUS_MISSING
+    )
+    critical_review_required = sum(
+        1 for item in updated_items
+        if item["severity"] == "critical" and item["status"] == STATUS_CONDITIONAL_MISSING
+    )
+    applicable = [item for item in updated_items if item["status"] != STATUS_NOT_APPLICABLE]
+    present = [item for item in applicable if item["status"] == STATUS_PRESENT]
+    coverage = round((len(present) / len(applicable)) * 100, 1) if applicable else 100.0
+
+    report["items"] = updated_items
+    report["summary"] = {
+        "totalItems": len(updated_items),
+        "applicableItems": len(applicable),
+        "present": counts.get(STATUS_PRESENT, 0),
+        "missing": counts.get(STATUS_MISSING, 0),
+        "conditionalMissing": counts.get(STATUS_CONDITIONAL_MISSING, 0),
+        "notApplicable": counts.get(STATUS_NOT_APPLICABLE, 0),
+        "unknown": counts.get(STATUS_UNKNOWN, 0),
+        "criticalMissing": critical_missing,
+        "criticalReviewRequired": critical_review_required,
+        "coveragePercent": coverage,
+    }
+    report["agentVerificationCompletedAt"] = datetime.now(UTC).isoformat().replace("+00:00", "Z")
+
+    return report
+

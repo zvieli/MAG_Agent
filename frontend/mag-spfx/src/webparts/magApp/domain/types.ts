@@ -176,6 +176,14 @@ export interface ProtocolCompletenessApplicabilityEvidence {
   pattern?: string;
 }
 
+export interface AgentVerificationDetails {
+  verifiedByAgent: boolean;
+  verbatimQuote?: string;
+  sourceLocation?: string;
+  explanation?: string;
+  verifiedAt?: string;
+}
+
 export interface ProtocolCompletenessItem {
   id: string;
   pillar: string;
@@ -190,7 +198,9 @@ export interface ProtocolCompletenessItem {
   reviewNote?: string;
   evidence: ProtocolCompletenessEvidence[];
   sourceRefs: Array<Record<string, string | number | undefined>>;
+  agentVerification?: AgentVerificationDetails;
 }
+
 
 export interface ProtocolCompletenessResult {
   docId: string;
