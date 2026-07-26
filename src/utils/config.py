@@ -184,9 +184,19 @@ class Settings(BaseSettings):
 
         raw_content = await config_manager.get_config(filename, category="prompts")
 
-        # Format the prompt with schema values
         schema = await self.get_schema()
         schema_dict = schema.model_dump() if hasattr(schema, "model_dump") else {}
+
+        # Load auxiliary prompt instructions if present in templates
+        groundedness_instr = ""
+        no_apologies_rule = ""
+        routing_instr = ""
+        try:
+            groundedness_instr = await config_manager.get_config("query_groundedness_instruction.md", category="prompts")
+            no_apologies_rule = await config_manager.get_config("query_no_apologies_rule.md", category="prompts")
+            routing_instr = await config_manager.get_config("query_routing_instructions_default.md", category="prompts")
+        except Exception as e:
+            logging.warning(f"[CONFIG] Failed to load auxiliary prompt files: {e}")
 
         format_map = {
             "human_entities": ", ".join(schema_dict.get("human_entity_types", [])),
@@ -197,11 +207,17 @@ class Settings(BaseSettings):
             "causality_relations": ", ".join(
                 schema_dict.get("causality_relations", [])
             ),
+            "entity_types": ", ".join(schema_dict.get("entity_types", [])),
             "entity_types_str": ", ".join(schema_dict.get("entity_types", [])),
+            "relation_types": ", ".join(schema_dict.get("causality_relations", [])),
+            "guidelines": "Follow forensic legal evidence rules strictly.",
             "legal_role_map": json.dumps(
                 schema_dict.get("legal_role_map", {}), ensure_ascii=False
             ),
             "investigation_language": "Hebrew",
+            "groundedness_instruction": groundedness_instr,
+            "no_apologies_rule": no_apologies_rule,
+            "routing_instructions": routing_instr,
         }
 
         formatted = raw_content.strip("\"'")

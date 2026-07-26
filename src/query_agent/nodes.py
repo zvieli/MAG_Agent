@@ -329,14 +329,28 @@ async def doc_branch_node(state: InvestigationState, config: RunnableConfig) -> 
     from src.utils.config_manager import config_manager
     system_prompt = await config_manager.get_config("doc_search_query_system.md")
     user_prompt = f"Task: {state.current_task}"
-    search_query = await call_llm(system_prompt, user_prompt)
+    res_str = await call_llm(system_prompt, user_prompt)
+    
+    semantic_query = res_str
+    keyword_query = None
+    
+    try:
+        clean_res = res_str.strip()
+        if clean_res.startswith("```"):
+            clean_res = clean_res.replace("```json", "").replace("```", "").strip()
+        data = json.loads(clean_res)
+        semantic_query = data.get("semantic_query", res_str)
+        keyword_query = data.get("keyword_query", None)
+    except Exception:
+        semantic_query = res_str.strip().strip('"').strip("'").strip()
+        keyword_query = semantic_query
     
     # 2. Call Doc Search (under strict partition context)
     kp = CloudKnowledgeProvider(search_mgr=SearchManager(), doc_id=state.doc_id)
-    raw_chunks = await kp.search_chunks_raw(search_query, top_k=6)
+    raw_chunks = await kp.search_chunks_raw(semantic_query, top_k=6, keyword_query=keyword_query)
     
     # 3. Rerank
-    reranked = await rerank_chunks_llm(search_query, raw_chunks, top_n=3)
+    reranked = await rerank_chunks_llm(semantic_query, raw_chunks, top_n=3)
     
     results = []
     for chunk in reranked:
@@ -347,7 +361,7 @@ async def doc_branch_node(state: InvestigationState, config: RunnableConfig) -> 
     log_event(
         "query.langgraph.doc_search.executed",
         **_obs_fields(state, config, node_name),
-        search_query=search_query,
+        search_query=semantic_query,
         raw_chunk_count=len(raw_chunks),
         reranked_chunk_count=len(reranked),
         duration_ms=elapsed_ms,
@@ -386,15 +400,34 @@ async def graph_branch_node(state: InvestigationState, config: RunnableConfig) -
         pass
 
     kp = CloudKnowledgeProvider(cosmos_mgr=CosmosGremlinManager(), doc_id=state.doc_id)
+    
+    # Resolve entity names to correct Cosmos DB node IDs
+    async def resolve_id(name: str) -> str:
+        if not name:
+            return ""
+        name_str = name.strip()
+        if "_" in name_str or name_str.isascii():
+            return name_str
+        matches = await kp.search_entities(name_str, top_k=3)
+        if matches:
+            for m in matches:
+                if m.get("label") == name_str:
+                    return m.get("id")
+            return matches[0].get("id")
+        return name_str
+
+    resolved_a = await resolve_id(entity_a)
+    resolved_b = await resolve_id(entity_b)
+
     results = []
 
     # 2. Execute programmatic tools with hardcoded partition filters
-    if action == "connections" and entity_a and entity_b:
-        paths = await kp.find_connections(entity_a, entity_b, max_hops=3)
+    if action == "connections" and resolved_a and resolved_b:
+        paths = await kp.find_connections(resolved_a, resolved_b, max_hops=3)
         results.append(f"Paths between {entity_a} and {entity_b}:\n{json.dumps(paths, indent=2, ensure_ascii=False)}")
         result_count = len(paths)
-    elif action == "timeline" and entity_a:
-        ctx = await kp.get_entity_context(entity_a)
+    elif action == "timeline" and resolved_a:
+        ctx = await kp.get_entity_context(resolved_a)
         events = []
         for rel in ctx.get("relationships", []):
             ts = rel.get("metadata", {}).get("meta_timestamp") or rel.get("metadata", {}).get("timestamp")
@@ -444,7 +477,9 @@ async def synthesis_node(state: InvestigationState, config: RunnableConfig) -> D
         tool_path.append("graph_query")
     
     from src.utils.config_manager import config_manager
-    system_prompt = await config_manager.get_config("synthesis_system.md")
+    base_system_prompt = await config_manager.get_config("synthesis_system.md")
+    groundedness_instr = await config_manager.get_config("query_groundedness_instruction.md")
+    system_prompt = f"{base_system_prompt}\n\n{groundedness_instr}"
     user_prompt = (
         "ענה בעברית בלבד. שמור מזהי מקורות כפי שהם מופיעים בחומר.\n\n"
         f"Vector Results:\n{doc_res}\n\nGraph Results:\n{graph_res}"

@@ -53,3 +53,4 @@ LangGraphDocs.md
 .pytest_cache
 docs
 tzr_data
+logs.txt

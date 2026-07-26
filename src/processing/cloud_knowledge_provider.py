@@ -136,6 +136,8 @@ class CloudKnowledgeProvider:
                         or_steps.append(f"has('type', containing({t_key}))")
                         or_steps.append(f"has('meta_forensic_summary', containing({t_key}))")
                         or_steps.append(f"has('description', containing({t_key}))")
+                        or_steps.append(f"has('alias_preview', containing({t_key}))")
+                        or_steps.append(f"has('meta_semantic_class', containing({t_key}))")
                     gremlin_query = f"g.V().has('pk', pk).or({', '.join(or_steps)})"
                 else:
                     gremlin_query = "g.V().has('pk', pk)"
@@ -152,6 +154,8 @@ class CloudKnowledgeProvider:
                         or_steps.append(f"has('type', containing({t_key}))")
                         or_steps.append(f"has('meta_forensic_summary', containing({t_key}))")
                         or_steps.append(f"has('description', containing({t_key}))")
+                        or_steps.append(f"has('alias_preview', containing({t_key}))")
+                        or_steps.append(f"has('meta_semantic_class', containing({t_key}))")
                     gremlin_query = f"g.V().or({', '.join(or_steps)})"
                 else:
                     gremlin_query = "g.V()"
@@ -182,6 +186,8 @@ class CloudKnowledgeProvider:
                 v_type_lower = str(v_clean.get("type", "")).lower()
                 v_desc = v_clean.get("description") or v_clean.get("meta_forensic_summary") or ""
                 v_desc_lower = str(v_desc).lower()
+                v_aliases = str(v_clean.get("alias_preview", "")).lower()
+                v_sem_class = str(v_clean.get("meta_semantic_class", "")).lower()
                 
                 score = 0.0
                 for term in terms:
@@ -211,6 +217,14 @@ class CloudKnowledgeProvider:
                     # Score on Description
                     if v_desc_lower and term_lower in v_desc_lower:
                         score += 2.0
+
+                    # Score on Aliases
+                    if v_aliases and term_lower in v_aliases:
+                        score += 8.0
+
+                    # Score on Semantic Class
+                    if v_sem_class and term_lower in v_sem_class:
+                        score += 3.0
 
                 if score > 0:
                     scored_entities.append((score, v_clean))
@@ -382,7 +396,7 @@ class CloudKnowledgeProvider:
         partition_key = self.doc_id if self.doc_id != "global" else None
         return await self.cosmos_mgr.get_low_confidence_patterns(threshold=threshold, partition_key=partition_key)
 
-    async def search_chunks(self, query: str, top_k: int = 10) -> str:
+    async def search_chunks(self, query: str, top_k: int = 10, keyword_query: Optional[str] = None) -> str:
         """
         Searches raw document chunks in Azure AI Search using Hybrid Vector Search.
         """
@@ -414,12 +428,16 @@ class CloudKnowledgeProvider:
                 connection_timeout=10,
                 read_timeout=30,
             ) as client:
+                text_search_query = keyword_query if keyword_query is not None else query
+
                 # Request up to 100 candidate chunks to ensure sufficient matches after prefix filtering
                 vector_query = VectorizedQuery(
                     vector=query_vec, k_nearest_neighbors=100, fields="embedding"
                 )
                 search_results = await client.search(
-                    search_text=query, vector_queries=[vector_query], top=100
+                    search_text=text_search_query,
+                    vector_queries=[vector_query],
+                    top=100
                 )
 
                 results = []
@@ -452,7 +470,7 @@ class CloudKnowledgeProvider:
             )
             return f"Error searching Azure AI Search: {str(e)}"
 
-    async def search_chunks_raw(self, query: str, top_k: int = 10) -> List[Dict[str, Any]]:
+    async def search_chunks_raw(self, query: str, top_k: int = 10, keyword_query: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Searches raw document chunks in Azure AI Search and returns raw results.
         """
@@ -480,12 +498,16 @@ class CloudKnowledgeProvider:
                 connection_timeout=10,
                 read_timeout=30,
             ) as client:
+                text_search_query = keyword_query if keyword_query is not None else query
+
                 # Request up to 100 candidate chunks to ensure sufficient matches after prefix filtering
                 vector_query = VectorizedQuery(
                     vector=query_vec, k_nearest_neighbors=100, fields="embedding"
                 )
                 search_results = await client.search(
-                    search_text=query, vector_queries=[vector_query], top=100
+                    search_text=text_search_query,
+                    vector_queries=[vector_query],
+                    top=100
                 )
 
                 results = []
