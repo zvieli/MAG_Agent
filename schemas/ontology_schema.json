@@ -277,24 +277,44 @@
     "description": "Advisory checklist for identifying investigation file components that were not found in uploaded case material. Missing means not detected in the supplied material, not a legal conclusion.",
     "source_guidelines": [
       {
+        "id": "tzr_1_03",
+        "path": "tzr_guidelines/כללי/הנחיה-מס-103-1.md",
+        "label": "ניהול חקירה, תיעוד זירה ומזכרים"
+      },
+      {
+        "id": "tzr_1_04",
+        "path": "tzr_data/1/הנחיית-תצ-ר-1-04-מעצרים.md",
+        "label": "מעצרים וצווי חיפוש"
+      },
+      {
         "id": "tzr_1_05",
         "path": "tzr_data/1/הנחיה-105-חומר-חקירה-מרץ-2019.md",
         "label": "חומר חקירה ורשימת חומר שנאסף"
       },
       {
-        "id": "tzr_3_02",
-        "path": "tzr_data/3/הנחיית-תצ-ר-3-02-מוצגים-יוני-2023.md",
-        "label": "מוצגים"
+        "id": "tzr_1_06",
+        "path": "tzr_guidelines/כללי/הנחיה-106-הטיפול-בחומר-חקירה-שעליו-נדרש-חיסיון-אוגוסט-2009.md",
+        "label": "חומר חקירה חסוי ופרפראזות"
       },
       {
-        "id": "tzr_1_04",
-        "path": "tzr_data/1/הנחיית-תצ-ר-1-04-מעצרים.md",
-        "label": "מעצרים"
+        "id": "tzr_1_08",
+        "path": "tzr_guidelines/כללי/הנחיות-התביעה-הצבאית-הנחיה-108.md",
+        "label": "אזהרה, זכויות נחקר ותיעוד חקירות"
+      },
+      {
+        "id": "tzr_1_12",
+        "path": "tzr_guidelines/כללי/הנחיה-112-חשדות-ותלונות-נובמבר-2020-2.md",
+        "label": "תלונות ודיווחים ראשוניים"
       },
       {
         "id": "tzr_1_13",
         "path": "tzr_data/1/הנחיית-תצ-ר-1-13-זכויות-נפגעי-עבירה-יולי-2023-2.md",
         "label": "זכויות נפגעי עבירה"
+      },
+      {
+        "id": "tzr_2_02",
+        "path": "tzr_guidelines/עבירות/הנחיה-202-אלימות-והתעללות-ינואר-2016.md",
+        "label": "תיעוד רפואי וחבלות"
       },
       {
         "id": "tzr_2_04",
@@ -304,12 +324,22 @@
       {
         "id": "tzr_2_05",
         "path": "tzr_data/2/הנחיה-2-05-עבירות-סמים-ינואר-2025-1.md",
-        "label": "עבירות סמים"
+        "label": "עבירות סמים ובדיקות מעבדה"
+      },
+      {
+        "id": "tzr_3_02",
+        "path": "tzr_data/3/הנחיית-תצ-ר-3-02-מוצגים-יוני-2023.md",
+        "label": "מוצגים ושרשרת ראיות"
       },
       {
         "id": "tzr_4_01",
         "path": "tzr_data/4/הנחיה-401-תוספות-ראייתיות-אוגוסט-2009.md",
         "label": "תוספות ראייתיות"
+      },
+      {
+        "id": "tzr_4_02",
+        "path": "tzr_guidelines/ראיות ועדים/הנחיה-מס-402.md",
+        "label": "גביית עדויות ועדויות מומחים"
       }
     ],
     "checklist_items": [
@@ -322,7 +352,7 @@
         "required_when": {"always": true},
         "evidence_signals": ["תלונה", "דוח פעולה", "דו\"ח פעולה", "דוח אירוע", "AAR", "הודעה ראשונית"],
         "missing_message_he": "לא אותרה תלונה ראשונית או דו\"ח פעולה בתיק שהועלה.",
-        "source_refs": [{"guideline": "client_protocol", "section": "Opening documents"}]
+        "source_refs": [{"guideline": "tzr_1_12", "pages": "1-3"}, {"guideline": "tzr_1_05", "pages": "1-3"}]
       },
       {
         "id": "investigation_material_list",
@@ -344,7 +374,7 @@
         "required_when": {"any_keywords": ["חסוי", "חיסיון", "מודיעיני", "מידע מודיעיני"]},
         "evidence_signals": ["תעודת חיסיון", "פרפראזה", "פראפרזה", "חומר חסוי", "מידע מודיעיני"],
         "missing_message_he": "יש אינדיקציה לחומר חסוי, אך לא אותרו תעודת חיסיון או פרפראזה.",
-        "source_refs": [{"guideline": "tzr_1_05", "pages": "2-4"}]
+        "source_refs": [{"guideline": "tzr_1_06", "pages": "1-6"}, {"guideline": "tzr_1_05", "pages": "2-4"}]
       },
       {
         "id": "suspect_interrogation_statement",
@@ -355,7 +385,7 @@
         "required_when": {"any_keywords": ["חשוד", "נאשם", "נחקר", "חקירת חשוד"]},
         "strong_evidence_signals": ["חקירת חשוד", "אמרת חשוד", "הודעת חשוד", "נחקר באזהרה", "תמלול חקירה", "חקירה באזהרה", "הודעה באזהרה", "מוסר ההודעה", "גובה ההודעה", "טופס הודעת חשוד"],
         "missing_message_he": "קיימת אינדיקציה לחשוד, אך לא אותרה חקירת חשוד או אמרת חשוד.",
-        "source_refs": [{"guideline": "client_protocol", "section": "Suspect interrogations"}]
+        "source_refs": [{"guideline": "tzr_1_08", "pages": "1-5"}, {"guideline": "tzr_1_04", "pages": "1-4"}]
       },
       {
         "id": "rights_warning_form",
@@ -366,7 +396,7 @@
         "required_when": {"any_keywords": ["חשוד", "נחקר באזהרה", "חקירה באזהרה"]},
         "evidence_signals": ["אזהרה", "זכות השתיקה", "זכות להיוועץ", "היוועצות בעורך דין", "הקראת זכויות", "זכויותיו"],
         "missing_message_he": "לא אותר תיעוד של אזהרת החשוד והקראת זכויות.",
-        "source_refs": [{"guideline": "client_protocol", "section": "Warning and reading of rights"}]
+        "source_refs": [{"guideline": "tzr_1_08", "pages": "1-4"}]
       },
       {
         "id": "complainant_or_victim_testimony",
@@ -377,7 +407,7 @@
         "required_when": {"any_keywords": ["מתלונן", "מתלוננת", "נפגע עבירה", "קורבן", "קרבן", "הודעת מתלונן", "הודעת נפגע"]},
         "strong_evidence_signals": ["עדות מתלונן", "עדות מתלוננת", "הודעת מתלונן", "הודעת נפגע", "הצהרת נפגע עבירה"],
         "missing_message_he": "יש אינדיקציה למתלונן או נפגע עבירה, אך לא אותרה עדותו.",
-        "source_refs": [{"guideline": "client_protocol", "section": "Collection of evidence"}]
+        "source_refs": [{"guideline": "tzr_4_02", "pages": "1-4"}, {"guideline": "tzr_1_13", "pages": "1-3"}]
       },
       {
         "id": "witness_testimony",
@@ -388,7 +418,7 @@
         "required_when": {"any_keywords": ["עד ראייה", "עדת ראייה", "עדי ראייה", "הודעת עד", "הודעת עדה", "מסר עדות", "גובה עדות"]},
         "strong_evidence_signals": ["עדות עד", "עדות עדה", "הודעת עד", "הודעת עדה", "עדי ראייה", "מסר עדות", "עדותו", "גובה עדות"],
         "missing_message_he": "קיימת אינדיקציה לעדים או מעורבים, אך לא אותרו עדויותיהם.",
-        "source_refs": [{"guideline": "client_protocol", "section": "Collection of evidence"}]
+        "source_refs": [{"guideline": "tzr_4_02", "pages": "1-5"}]
       },
       {
         "id": "forensic_or_lab_report",
@@ -399,7 +429,7 @@
         "required_when": {"any_keywords": ["DNA", "דנ\"א", "טביעת אצבע", "מעבדה", "סם", "סמים", "אלכוהול", "נשק", "בליסטיקה", "דגימה"]},
         "evidence_signals": ["חוות דעת מומחה", "דו\"ח מעבדה", "בדיקת מעבדה", "בדיקת סמים", "דגימת שתן", "בדיקת DNA", "טביעות אצבע", "בליסטיקה"],
         "missing_message_he": "יש אינדיקציה לראיה מדעית או פורנזית, אך לא אותר דו\"ח בדיקה מתאים.",
-        "source_refs": [{"guideline": "client_protocol", "section": "Forensic and scientific evidence"}, {"guideline": "tzr_2_05", "pages": "1-5"}]
+        "source_refs": [{"guideline": "tzr_2_05", "pages": "1-5"}]
       },
       {
         "id": "medical_documentation",
@@ -410,7 +440,7 @@
         "required_when": {"any_keywords": ["חבלה", "פציעה", "פצוע", "נזק גוף", "פגיעה גופנית", "רפואי"]},
         "evidence_signals": ["תעודה רפואית", "מסמך רפואי", "חוות דעת רפואית", "בדיקה רפואית", "סיכום אשפוז", "חבלות"],
         "missing_message_he": "יש אינדיקציה לפגיעה גופנית או רפואית, אך לא אותר תיעוד רפואי.",
-        "source_refs": [{"guideline": "client_protocol", "section": "Medical certificates and opinions"}]
+        "source_refs": [{"guideline": "tzr_2_02", "pages": "1-4"}]
       },
       {
         "id": "exhibit_description_or_seizure",
@@ -457,7 +487,7 @@
         "strong_evidence_signals": ["פריקת טלפון", "פריקת מחשב", "פלטי שיחות", "פלט מדיה", "דוח פריקה", "דו\"ח פריקה", "תוצרי מדיה", "מצלמות אבטחה", "מצלמת גוף", "סרטון", "וידאו", "תמונה", "תיאור מוצג", "מציג לך פריט", "מציג לך סרטון", "קובץ וידאו", "תיעוד חזותי", "תיעוד קולי"],
         "missing_message_he": "יש אינדיקציה לראיה דיגיטלית או מדיה, אך לא אותרו תוצרי בדיקה/פריקה/תיעוד.",
         "present_message_he": "אותר תיאור מוצג דיגיטלי או מדיה בחומר התיק.",
-        "source_refs": [{"guideline": "client_protocol", "section": "Digital evidence"}]
+        "source_refs": [{"guideline": "tzr_3_02", "pages": "5-8"}, {"guideline": "tzr_1_05", "pages": "16-19"}]
       },
       {
         "id": "warrants_and_authorizations",
@@ -468,7 +498,7 @@
         "required_when": {"any_keywords": ["מעצר", "חיפוש", "חדירה לחומר מחשב", "צו", "פקודת מעצר"]},
         "evidence_signals": ["צו מעצר", "פקודת מעצר", "צו חיפוש", "צו חדירה", "אישור בכתב", "החלטת בית הדין", "הארכת מעצר"],
         "missing_message_he": "יש אינדיקציה למעצר, חיפוש או פעולה המחייבת אישור, אך לא אותר צו/אישור מתאים.",
-        "source_refs": [{"guideline": "tzr_1_04", "pages": "1-6"}, {"guideline": "client_protocol", "section": "Legal warrants"}]
+        "source_refs": [{"guideline": "tzr_1_04", "pages": "1-6"}]
       },
       {
         "id": "victim_rights_notification",
@@ -490,7 +520,7 @@
         "required_when": {"always": true},
         "evidence_signals": ["סיכום תיק", "סיכום חקירה", "סיכום ראיות", "המלצת היחידה", "המלצת מצ\"ח", "חוות דעת פרקליט"],
         "missing_message_he": "לא אותר סיכום תיק או המלצת גורם חוקר/תביעה.",
-        "source_refs": [{"guideline": "client_protocol", "section": "Summary and background"}]
+        "source_refs": [{"guideline": "tzr_1_05", "pages": "20-23"}]
       },
       {
         "id": "criminal_or_disciplinary_record",
@@ -502,7 +532,7 @@
         "strong_evidence_patterns": ["תדפיס\\s+מידע\\s+פלילי"],
         "evidence_signals": ["עבר פלילי", "עבר משמעתי", "הרשעות קודמות", "רישום פלילי", "רישום משמעתי", "תדפיס מידע פלילי", "CDR"],
         "missing_message_he": "יש אינדיקציה לחשוד או נאשם, אך לא אותרה בדיקת עבר פלילי/משמעתי.",
-        "source_refs": [{"guideline": "client_protocol", "section": "Criminal/disciplinary record"}, {"guideline": "tzr_2_05", "pages": "2-5"}]
+        "source_refs": [{"guideline": "tzr_2_05", "pages": "2-5"}, {"guideline": "tzr_1_05", "pages": "12-15"}]
       },
       {
         "id": "corroboration_review",
@@ -514,6 +544,61 @@
         "evidence_signals": ["דבר מה נוסף", "תוספת ראייתית", "סיוע", "חיזוק", "ראיה מחזקת", "אימות ההודאה"],
         "missing_message_he": "קיימת אינדיקציה לראיה הטעונה חיזוק/סיוע, אך לא אותרה בחינת תוספת ראייתית.",
         "source_refs": [{"guideline": "tzr_4_01", "pages": "1-4"}]
+      },
+      {
+        "id": "initial_scene_memos",
+        "pillar": "opening",
+        "label_he": "מזכרים ראשוניים ותיעוד זירה",
+        "description_he": "מזכרים ותיעוד פעולות חקירה דחופות שבוצעו בזירת האירוע.",
+        "severity": "warning",
+        "required_when": {"always": true},
+        "evidence_signals": ["מזכר ראשוני", "תיעוד זירה", "פעולות דחופות", "מזכר זירה", "זירת האירוע"],
+        "missing_message_he": "לא אותרו מזכרים ראשוניים או תיעוד פעולות דחופות בזירה.",
+        "source_refs": [{"guideline": "tzr_1_03", "pages": "1-4"}, {"guideline": "tzr_1_05", "pages": "5-8"}]
+      },
+      {
+        "id": "interrogation_audio_visual_recording",
+        "pillar": "interrogations",
+        "label_he": "תיעוד חזותי וקולי של חקירה",
+        "description_he": "תיעוד חזותי, קולי או קובצי מדיה של חקירת החשוד.",
+        "severity": "warning",
+        "required_when": {"any_keywords": ["חשוד", "נאשם", "חקירת חשוד"]},
+        "evidence_signals": ["תיעוד חזותי", "תיעוד קולי", "הקלטת חקירה", "קובץ מדיה", "תמלול חקירה", "סרטון חקירה", "קובץ קול"],
+        "missing_message_he": "קיימת אינדיקציה לחקירת חשוד, אך לא אותר תיעוד חזותי או קולי.",
+        "source_refs": [{"guideline": "tzr_1_08", "pages": "5-8"}]
+      },
+      {
+        "id": "expert_witness_testimony",
+        "pillar": "testimony",
+        "label_he": "עדויות מומחים",
+        "description_he": "עדות מפורשת או חוות דעת של עד מומחה המגיש עדות בתיק.",
+        "severity": "warning",
+        "required_when": {"any_keywords": ["מומחה", "חוות דעת מומחה", "עד מומחה", "חוות דעת"]},
+        "evidence_signals": ["עדות מומחה", "עד מומחה", "חוות דעת מומחה", "חוות דעת מומחה מטעם"],
+        "missing_message_he": "יש אינדיקציה לעד מומחה, אך לא אותרה עדות או חוות דעת מתאימה.",
+        "source_refs": [{"guideline": "tzr_4_02", "pages": "6-10"}]
+      },
+      {
+        "id": "confrontation_reconstruction_reports",
+        "pillar": "warrants_actions",
+        "label_he": "דוחות עימות, הובלה ושחזור",
+        "description_he": "תיעוד עימות בין מעורבים, הובלה, הצבעה או שחזור בזירת העבירה.",
+        "severity": "warning",
+        "required_when": {"any_keywords": ["עימות", "שחזור", "הובלה והצבעה", "הובלה", "הצבעה"]},
+        "evidence_signals": ["דוח עימות", "דו\"ח עימות", "שחזור", "הובלה והצבעה", "דוח שחזור", "דו\"ח שחזור"],
+        "missing_message_he": "קיימת אינדיקציה לעימות או שחזור, אך לא אותר דוח מתאים.",
+        "source_refs": [{"guideline": "tzr_1_03", "pages": "5-8"}, {"guideline": "tzr_4_02", "pages": "3-6"}]
+      },
+      {
+        "id": "investigator_continuation_memos",
+        "pillar": "warrants_actions",
+        "label_he": "מזכרי המשך של חוקרים",
+        "description_he": "מזכרי מעקב והמשך פעולות חקירה שנגבו על ידי חוקרי התיק.",
+        "severity": "info",
+        "required_when": {"always": true},
+        "evidence_signals": ["מזכר המשך", "מזכר חוקר", "מזכר מעקב", "המשך חקירה", "פעולת חקירה"],
+        "missing_message_he": "לא אותרו מזכרי המשך או מעקב חקירתי בתיק.",
+        "source_refs": [{"guideline": "tzr_1_03", "pages": "1-3"}, {"guideline": "tzr_1_05", "pages": "5-9"}]
       }
     ]
   },
