@@ -1,43 +1,55 @@
 # MAG Agent
 
-MAG Agent is a Hebrew investigative GraphRAG system for military/legal investigation files. It ingests raw PDFs, extracts a typed knowledge graph, stores searchable evidence artifacts, and exposes a query agent that answers case questions from graph and source material.
+MAG Agent is a Hebrew investigative GraphRAG system for military and legal investigation files. It ingests raw PDFs, extracts a typed knowledge graph, stores searchable evidence artifacts, and exposes an agentic query engine that answers case questions using graph traversals and source text.
 
-The current system has three main surfaces:
+The system consists of three main operational surfaces:
 
-- **Ingestion pipeline**: Azure Durable Functions map-reduce pipeline for PDF parsing, chunking, graph extraction, merge, indexing, report generation, and protocol completeness checks.
-- **Case APIs**: HTTP endpoints for graph, timeline, report, communities, protocol completeness, pipeline status, and query-agent execution.
-- **SPFx frontend**: SharePoint web part for upload, pipeline tracking, graph/report/timeline review, protocol completeness review, and chat with the query agent.
+- **Ingestion & Extraction Pipeline**: Azure Durable Functions map-reduce pipeline for PDF layout parsing, chunking, embedding generation, LLM graph extraction, entity resolution, community detection, report generation, and protocol completeness checks.
+- **Case APIs**: HTTP endpoints for graph, timeline, report, community summaries, protocol completeness, pipeline status, on-demand agent verification, and query-agent execution.
+- **SPFx Frontend**: SharePoint web part for case upload, pipeline tracking, interactive graph visualization (Cytoscape.js), report/timeline review, protocol completeness audit, and agent chat interface backed by client-side IndexedDB caching (`browserCache`).
 
 ---
 
-## Architecture
+## Architecture & Multi-Tier Caching
 
 ```mermaid
 graph TD
     PDF[Raw PDF] --> API[Function App HTTP API]
     API --> ORCH[Durable pipeline_orchestrator]
-    ORCH --> DI[Azure AI Document Intelligence]
+    ORCH --> DI_CACHE{DI Layout Cache}
+    DI_CACHE -- Miss --> DI[Azure AI Document Intelligence]
+    DI_CACHE -- Hit --> CHUNKS
     DI --> CHUNKS[Chunk artifacts + Azure AI Search]
-    CHUNKS --> LLM[LLM graph extraction]
-    LLM --> MERGE[Entity resolution + merge]
+    CHUNKS --> PROMPT_CACHE{Prompt Cache}
+    PROMPT_CACHE --> LLM[Azure OpenAI Graph Extraction]
+    LLM --> MERGE[Entity resolution & Merge]
     MERGE --> COSMOS[(Cosmos DB Gremlin)]
-    MERGE --> REPORTS[Blob reports + visualizations]
-    MERGE --> COMPLETE[Protocol completeness artifact]
+    MERGE --> REPORTS[Blob Reports & Summaries]
+    MERGE --> COMPLETE[Protocol Completeness Artifact]
 
     UI[SPFx Frontend] --> API
     API --> QUERY[Durable query_orchestrator]
-    QUERY --> AGENT[Query Agent]
+    QUERY --> AGENT[LangGraph Query Agent]
     AGENT --> COSMOS
     AGENT --> CHUNKS
     AGENT --> REPORTS
 ```
 
-Core data flow:
+### Key Architectural & Optimization Pillars
 
-1. `POST /api/pipelines` receives a PDF and starts a Durable ingestion instance.
-2. The pipeline writes chunks, raw text, partial graph artifacts, final graph JSON, reports, and `protocol_completeness.json`.
-3. Final graph nodes/edges are synced to Cosmos DB Gremlin with strict per-case partitioning using `doc_id`/`pk`.
-4. The frontend and query agent read the same case artifacts through HTTP APIs.
+1. **Multi-Tier Caching Pipeline**:
+   - **Document Intelligence Layout Cache (`di_cache/{pdf_hash}.json`)**: Caches PDF page layout extraction using SHA-256 content hashes of raw PDF bytes, eliminating redundant layout API calls on re-runs.
+   - **Azure OpenAI Prompt Caching**: Extraction prompts in `_build_prompt` are structured into a continuous **Static Prefix** (\(\ge 1,024\) tokens of ontology definitions, relation tables, and behavioral rules) and a **Dynamic Suffix** (pre-extracted regex findings, chunk context, raw text). Chunks 2..\(N\) hit the prompt cache, saving 50% on input token costs.
+   - **Persistent Extraction Cache (`extraction_cache/`)**: Chunk extraction results are cached by `(model, schema_version, chunk_hash)` in Azure Blob Storage and retained across pipeline executions.
+   - **Preserved Extracted Materials (`extracted/{doc_id}`)**: Unified Markdown text and chunk artifacts are preserved in storage for fast text retrieval and re-chunking.
+
+2. **LangGraph Command-Based Query Agent**:
+   - Built on a state-machine graph (`src/query_agent/nodes.py`) utilizing `Command(goto=...)` for dynamic routing between nodes: `hydrate` \(\rightarrow\) `coordinator` \(\rightarrow\) `doc_branch` / `graph_branch` \(\rightarrow\) `synthesis` \(\rightarrow\) `extraction` \(\rightarrow\) `halt_for_hitl` \(\rightarrow\) `planner` \(\rightarrow\) `finalizer`.
+   - Includes **Human-In-The-Loop (HITL)** fact approval ledgers (`VerifiedFact`, `PendingFactApproval`) and **Recursion Limit Safeguards** (`remaining_steps <= 2`) that force graceful finalizer fallback.
+
+3. **Protocol Completeness & Agent Verification**:
+   - Analyzes case coverage against required investigative materials defined in `schemas/ontology_schema.json`.
+   - Exposes `POST /api/cases/{docId}/completeness/verify` to asynchronously verify missing or ambiguous protocol items via background QueryAgent searches.
 
 ---
 
@@ -47,20 +59,21 @@ Core data flow:
 MAG_Agent/
 ├── function_app.py              # Azure Functions HTTP routes, Durable orchestrators, activities
 ├── schemas/ontology_schema.json # Extraction ontology + protocol completeness configuration
-├── scripts/                     # Local/cloud runbooks and backfill utilities
+├── prompts/                     # Externalized system prompts and instruction templates
+├── scripts/                     # Local/cloud runbooks, test suites, and backfill utilities
 ├── monitoring/                  # Azure Monitor / App Insights KQL snippets
-├── frontend/mag-spfx/           # SharePoint Framework web part
-├── src/extraction/              # LLM extraction and post-processing
-├── src/graph/                   # Entity resolution, graph normalization, Cosmos sync
-├── src/models/                  # Pydantic DTOs and ontology config models
-├── src/processing/              # Pipeline activities, chunking, indexing, cloud retrieval
-├── src/query_agent/             # Query agent state, tools, LangGraph-style nodes
-├── src/reporting/               # Markdown reports and protocol completeness analyzer
+├── frontend/mag-spfx/           # SharePoint Framework web part (React, Fluent UI, Cytoscape.js)
+├── src/extraction/              # LLM extraction, prompt caching optimization, post-processing
+├── src/graph/                   # Entity resolution, graph normalization, Cosmos DB Gremlin sync
+├── src/models/                  # Pydantic DTOs, graph models, and ontology config models
+├── src/processing/              # Pipeline activities, DI layout caching, chunking, indexing
+├── src/query_agent/             # LangGraph state machine, nodes, HITL ledger, tool execution
+├── src/reporting/               # Markdown report generator & protocol completeness analyzer
 ├── src/storage/                 # Blob/Azurite artifact store and Azure Search manager
 └── src/utils/                   # Config, JSON repair, Hebrew helpers, observability
 ```
 
-Each source module has its own README for implementation orientation.
+Each source module contains its own dedicated `README.md` for detailed technical orientation.
 
 ---
 
@@ -145,11 +158,11 @@ curl -sS "http://localhost:7071/api/pipelines/${INSTANCE_ID}" \
 
 ## API Surface
 
-Primary local endpoints:
+Primary endpoints:
 
 - `GET /api/ping`
 - `GET /api/health`
-- `GET /api/debug_logs` enabled only in local/dev or with `MAG_ENABLE_DEBUG_LOGS=true`
+- `GET /api/debug_logs` (enabled in local/dev or with `MAG_ENABLE_DEBUG_LOGS=true`)
 - `POST /api/pipelines`
 - `GET /api/pipeline-preflight?filename=<filename>`
 - `GET /api/pipelines/{instanceId}`
@@ -159,8 +172,9 @@ Primary local endpoints:
 - `GET /api/cases/{docId}/report`
 - `GET /api/cases/{docId}/communities`
 - `GET /api/cases/{docId}/completeness`
+- `POST /api/cases/{docId}/completeness/verify`
 
-All pipeline and query requests should include:
+All pipeline and query requests send:
 
 ```http
 x-mag-trace-id: <client-generated-trace-id>
@@ -176,26 +190,7 @@ Detailed Azure Monitor / App Insights KQL examples are maintained in [monitoring
 
 ### Local Trace Lookup
 
-For a known Durable instance, fetch its status and read `customStatus.trace_id`:
-
-```bash
-INSTANCE_ID="<durable-instance-id>"
-
-TRACE_ID=$(curl -sS "http://localhost:7071/api/pipelines/${INSTANCE_ID}" \
-  -H "x-mag-trace-id: lookup-${INSTANCE_ID}" \
-  | jq -r '.customStatus.trace_id // empty')
-
-echo "$TRACE_ID"
-```
-
-Search recent local logs:
-
-```bash
-docker compose logs --tail=1000 function-app \
-  | rg "${TRACE_ID}|${INSTANCE_ID}"
-```
-
-Pretty-print only structured observability logs:
+Search recent local logs for a known trace or instance ID:
 
 ```bash
 docker compose logs --tail=1000 function-app \
@@ -204,129 +199,15 @@ docker compose logs --tail=1000 function-app \
   | jq
 ```
 
-### Query Agent Trace Lookup
-
-Start a query with an explicit trace ID:
-
-```bash
-TRACE_ID="query-test-$(date +%s)"
-DOC_ID="<case-doc-id>"
-
-START_RESPONSE=$(curl -sS -X POST "http://localhost:7071/api/query" \
-  -H "Content-Type: application/json" \
-  -H "x-mag-trace-id: ${TRACE_ID}" \
-  --data-binary @- <<JSON
-{
-  "doc_id": "${DOC_ID}",
-  "question": "מי החשודה המרכזית בתיק ומה מיוחס לה?"
-}
-JSON
-)
-
-echo "$START_RESPONSE" | jq
-INSTANCE_ID=$(echo "$START_RESPONSE" | jq -r '.id // empty')
-```
-
-Poll the query Durable instance:
-
-```bash
-curl -sS "http://localhost:7071/api/pipelines/${INSTANCE_ID}" \
-  -H "x-mag-trace-id: lookup-${INSTANCE_ID}" \
-  | jq
-```
-
-Trace the full query-agent execution. Use `TRACE_ID` for LangGraph events because only the outer Durable start event carries the Durable `INSTANCE_ID`:
-
-```bash
-docker compose logs --tail=1000 function-app \
-  | rg "\[OBS\].*${TRACE_ID}" \
-  | sed -E 's/^.*\[OBS\] //' \
-  | jq
-```
-
-Show only LangGraph routing/tool events:
-
-```bash
-docker compose logs --tail=1000 function-app \
-  | rg "\[OBS\].*query\.langgraph.*${TRACE_ID}" \
-  | sed -E 's/^.*\[OBS\] //' \
-  | jq
-```
-
-### Expected Pipeline Events
-
-- `pipeline.started`
-- `pipeline.orchestrator_started`
-- `pipeline.chunking.completed`
-- `pipeline.extraction.chunk_completed`
-- `pipeline.merge.completed`
-- `pipeline.final_indexing.completed`
-- `pipeline.completed`
-- `pipeline.failed`
-- `protocol_completeness.generated`
-- metric events such as `pipeline_start_count`, `pipeline_success_count`, `pipeline_failure_count`
-
-### Expected Query Events
-
-- `query.started`
-- `query.orchestrator_started`
-- `query.langgraph.node.started`
-- `query.langgraph.plan.created`
-- `query.langgraph.route.selected`
-- `query.langgraph.doc_search.executed`
-- `query.langgraph.graph_action.selected`
-- `query.langgraph.synthesis.completed`
-- `query.langgraph.extraction.completed`
-- `query.langgraph.hitl.pending`
-- `query.langgraph.hitl.processed`
-- `query.langgraph.finalized`
-- `query.completed`
-- `query.failed`
-- metric events such as `query_success_count`, `query_duration_ms`, `query_failure_count`
-
-### App Insights Lookup
-
-```kusto
-let target_trace_id = "pipeline-or-query-trace-id";
-traces
-| where message has target_trace_id
-| order by timestamp asc
-```
-
-Structured-only view:
-
-```kusto
-let target_trace_id = "pipeline-or-query-trace-id";
-traces
-| where message startswith "[OBS] "
-| where message has target_trace_id
-| extend obs = parse_json(substring(message, 6))
-| project timestamp, event=tostring(obs.event), trace_id=tostring(obs.trace_id), doc_id=tostring(obs.doc_id), instance_id=tostring(obs.instance_id), obs
-| order by timestamp asc
-```
-
----
-
-## Frontend
-
-The SPFx web part lives in [frontend/mag-spfx](frontend/mag-spfx/README.md). It supports mock mode and live Function App mode. Live mode sends `x-mag-trace-id` for pipeline upload/preflight/status and query start/status calls.
-
-```bash
-cd frontend/mag-spfx
-npm install
-npm run trust-cert
-npm run serve
-```
-
 ---
 
 ## Quality Checks
 
-Backend focused checks:
+Backend quality check & unit tests:
 
 ```bash
 .venv/bin/ruff check function_app.py src tests
-.venv/bin/python -m pytest -q
+PYTHONPATH=. ./.venv/bin/pytest -q
 ```
 
 Frontend type check:

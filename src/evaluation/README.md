@@ -1,25 +1,32 @@
 # Evaluation Module
 
-`src/evaluation/` contains offline quality checks for extraction, graph health, retrieval, routing, and answer groundedness.
+`src/evaluation/` provides quality evaluation frameworks for graph extraction, retrieval precision, agent answer groundedness, routing accuracy, and prompt structure verification.
 
-## Current Components
+## Components
 
-- `extraction_evaluator.py`: compares extracted graph items against gold/reference extraction data.
-- `graph_evaluator.py`: computes graph quality and topology health metrics.
-- `metrics.py`: shared quality and groundedness metrics.
-- `rag_evaluator.py`: evaluates query-agent answers against expected answers and citations.
-- `retrieval_evaluator.py`: evaluates Azure AI Search retrieval quality for source chunks.
-- `routing_evaluator.py`: evaluates query-routing behavior.
+- `rag_evaluator.py`: Evaluates query-agent answers against reference answers, measuring groundedness, factual alignment, and citation accuracy.
+- `retrieval_evaluator.py`: Evaluates Azure AI Search retrieval quality for source document chunks (MRR, Hit@K, Recall).
+- `extraction_evaluator.py`: Compares extracted knowledge graph nodes and edges against gold-standard evaluation benchmarks.
+- `graph_evaluator.py`: Computes graph topology health, connectivity metrics, and community structure quality.
+- `routing_evaluator.py`: Evaluates query routing decisions (`doc_branch`, `graph_branch`, or `parallel`).
+- `metrics.py`: Shared evaluation metric calculation functions.
 
-## Typical Uses
+## Automated Groundedness & Prompt Structure Unit Tests (`tests/`)
 
-- Regression testing extraction quality after prompt/schema changes.
-- Measuring retrieval hit rate after embedding or chunking changes.
-- Checking graph health after entity-resolution changes.
-- Evaluating query-agent groundedness before demos or releases.
+- `test_agent_groundedness_prompts.py`: Verifies template variable formatting, citation instruction binding in synthesis/finalizer prompts, and tests `_build_prompt` prompt loading structure.
+- `test_build_prompt_loading_and_structure_printing`: Tests extraction prompt loading, prints the full rendered prompt to stdout (via `pytest -s`), and asserts that the **Static Prefix** precedes the **Dynamic Suffix** for Azure OpenAI Prompt Caching.
+
+## Typical Evaluation Workflows
+
+```bash
+# Run unit test suite including prompt structure & groundedness verification
+PYTHONPATH=. ./.venv/bin/pytest tests/test_agent_groundedness_prompts.py -s
+
+# Run full evaluation suite
+.venv/bin/python -m evals.run_rag_eval
+```
 
 ## Maintainer Notes
 
-- Keep evaluators separate from production pipeline activities.
-- Prefer deterministic fixtures and small reference datasets for CI.
-- Do not require live Azure dependencies for unit-level evaluator tests unless the test is explicitly marked/invoked as integration.
+- Evaluators are designed for quality diagnostics and CI benchmark runs; they are kept strictly decoupled from production pipeline activities.
+- Use deterministic mock fixtures for unit tests so they can execute fast without cloud dependencies.

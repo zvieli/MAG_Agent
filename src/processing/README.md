@@ -1,62 +1,68 @@
 # Processing Module
 
-`src/processing/` contains the ingestion pipeline activities and cloud retrieval/indexing adapters used by the Function App.
+`src/processing/` contains ingestion pipeline activities, document layout caching, vector indexing adapters, and cloud retrieval providers used by Azure Functions.
 
-The Durable orchestrator itself is defined in `function_app.py`; the activity implementations live here.
+The Durable Orchestrators (`pipeline_orchestrator`, `completeness_verification_orchestrator`) are defined in `function_app.py`, while activity implementations live in this package.
 
 ## Responsibilities
 
-- Parse PDFs with Azure AI Document Intelligence.
-- Normalize Hebrew/right-to-left text and split documents into chunks.
+- Parse raw PDFs using Azure AI Document Intelligence with content-hashed layout caching (`di_cache/`).
+- Clean and normalize Hebrew right-to-left text and construct discrete chunks.
 - Generate embeddings and index chunks in Azure AI Search.
-- Run chunk-level graph extraction.
-- Merge partial graph outputs and run entity resolution.
-- Generate final graph/report/protocol-completeness artifacts.
-- Sync graph records to Cosmos DB Gremlin.
-- Provide cloud-backed graph/source retrieval for the query agent.
+- Run chunk-level graph extraction with persistent result caching (`extraction_cache/`).
+- Merge partial graphs, resolve duplicate entities, and run community detection.
+- Sync final graph vertices and edges to Cosmos DB Gremlin with `doc_id`/`pk` partitioning.
+- Generate reports, community summaries, and protocol completeness artifacts.
+- Preserve raw Markdown and chunk artifacts (`extracted/{doc_id}`) for fast text retrieval and re-chunking.
+- Perform background protocol completeness verification using the query agent.
 
-## Current Components
+## Components
 
-- `document_processor.py`: PDF/Markdown parsing, DI integration, Hebrew cleanup, chunk generation.
-- `orchestration_activities.py`: Durable activity implementations and pipeline observability events.
-- `vector_indexer.py`: embedding generation and Azure AI Search indexing.
-- `cloud_knowledge_provider.py`: Cosmos/Search-backed retrieval methods for the query agent.
-- `persistence_manager.py`: artifact persistence coordination.
-- `strategies.py`: strategy wrappers used by pipeline orchestration.
+- `orchestration_activities.py`: Implementations of all Durable Function activities (`activity_preflight_check`, `activity_chunking`, `activity_extract_chunk`, `activity_merge_partials`, `activity_final_indexing`, `activity_cleanup_failed_run`, `activity_verify_protocol_completeness`).
+- `document_processor.py`: PDF layout parsing via Document Intelligence, PyMuPDF fallback, Hebrew text normalization, and chunk generation.
+- `vector_indexer.py`: Azure OpenAI embedding generation and Azure AI Search document upload.
+- `cloud_knowledge_provider.py`: Retrieval provider for Azure AI Search (vector + keyword search) and Cosmos DB Gremlin (graph traversals, connections, timelines).
+- `persistence_manager.py`: Coordinator for blob storage persistence.
+- `strategies.py`: Pipeline strategy wrappers (DefaultEntityResolver, DefaultReporter).
 
-## Pipeline Flow
+## Pipeline Ingestion Flow
 
 ```mermaid
 sequenceDiagram
     participant HTTP as POST /api/pipelines
     participant O as pipeline_orchestrator
     participant A as orchestration_activities.py
-    participant S as Blob/Azurite
+    participant S as Azure Blob Storage
     participant Search as Azure AI Search
-    participant C as Cosmos Gremlin
+    participant C as Cosmos DB Gremlin
 
-    HTTP->>S: write uploaded PDF
-    HTTP->>O: start with blob_path, doc_id, trace_id
+    HTTP->>S: Write uploaded PDF
+    HTTP->>O: Start pipeline (blob_path, doc_id, trace_id)
     O->>A: activity_preflight_check
     O->>A: activity_chunking
-    A->>S: write raw text and chunks
-    A->>Search: index chunk embeddings
-    O->>A: activity_extract_chunk per chunk
-    A->>S: write partial extraction artifacts
+    alt Layout Cached in di_cache/{pdf_hash}.json
+        A->>S: Read cached pages
+    else Layout Cache Miss
+        A->>A: Call Document Intelligence
+        A->>S: Save di_cache/{pdf_hash}.json
+    end
+    A->>S: Write extracted_text/{doc_id}.md and chunks
+    A->>Search: Index chunk embeddings
+    O->>A: activity_extract_chunk (per chunk)
+    A->>S: Read/Write extraction_cache/ & extracted/{doc_id}
     O->>A: activity_merge_partials
-    A->>S: write merged graph artifact
+    A->>S: Write graph/{doc_id}/partial.json
     O->>A: activity_final_indexing
-    A->>C: sync final graph
-    A->>S: write reports and protocol completeness
+    A->>C: Sync vertices & edges (pk=doc_id)
+    A->>S: Write reports, summaries, & protocol_completeness.json
 ```
 
-## Observability
+## Protocol Completeness Verification Activity
 
-Activities emit structured `[OBS]` logs and metrics for phase completion, failures, durations, protocol completeness, and LLM cost-control decisions. The trace ID is passed from the HTTP request into Durable input and custom status.
+`activity_verify_protocol_completeness` runs on-demand when requested by `POST /api/cases/{docId}/completeness/verify`. It audits missing items by executing targeted searches via `QueryAgent` and updates `graph/{doc_id}/protocol_completeness.json` in Blob Storage.
 
 ## Maintainer Notes
 
-- Activity inputs/outputs should remain JSON-serializable.
-- Keep artifact paths explicit; Durable history should not contain large payloads.
-- Keep cleanup scoped to generated intermediate artifacts only.
-- Preserve `doc_id`/`trace_id` through every activity boundary.
+- **Payload Sizes**: Activity inputs/outputs must remain small and JSON-serializable; claim-check patterns are used for chunks and graph JSONs.
+- **Cache Preservation**: `di_cache/`, `extraction_cache/`, and `extracted/{doc_id}` are intentionally preserved across runs to prevent redundant Document Intelligence and Azure OpenAI LLM calls.
+- **Trace Context**: `trace_id` must be passed through every activity parameter and logged with `[OBS]` prefixes.

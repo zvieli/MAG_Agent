@@ -1,44 +1,40 @@
 # Graph Module
 
-`src/graph/` owns graph normalization, entity resolution, graph analysis helpers, and Cosmos DB Gremlin persistence.
+`src/graph/` handles graph normalization, entity resolution, NetworkX topology analysis, and Cosmos DB Gremlin persistence.
 
 ## Responsibilities
 
-- Normalize extracted node and edge labels into stable graph identifiers.
-- Resolve duplicate entities and remap edges before final indexing.
-- Preserve provenance, aliases, confidence, source file, and source location metadata.
-- Sync final graph data to Cosmos DB Gremlin with per-case partitioning.
-- Provide local graph utilities for NetworkX-based reporting and visualization.
+- Normalize raw extracted node and edge identifiers into canonical graph symbols.
+- Perform duplicate entity detection and edge re-mapping (`DefaultEntityResolver`).
+- Assign topological community IDs to nodes prior to database synchronization.
+- Sync final graph data to Cosmos DB Gremlin with strict per-case partition keys (`doc_id`/`pk`).
+- Build NetworkX graph structures for local reporting, community clustering, and visualization.
 
-## Current Components
+## Components
 
-- `cosmos_manager.py`: async Gremlin manager for Cosmos DB operations, traversal execution, and graph sync.
-- `entity_resolver.py`: duplicate detection and merge logic for extracted entities.
-- `graph_manager.py`: in-memory graph loading, merge coordination, and JSON export helpers.
-- `local_graphify.py`: NetworkX graph construction, community detection, and visualization helpers.
-- `normalizer.py`: ID, label, and Hebrew text normalization utilities.
-- `ontology_enricher.py`: ontology-oriented enrichment and structural relationship helpers.
+- `cosmos_manager.py`: `CosmosGremlinManager` for async Gremlin traversals, parameterized query execution, vertex/edge upserts, and graph synchronization.
+- `entity_resolver.py`: Entity resolution and duplicate merging based on configurable string distance and semantic label matching.
+- `graph_manager.py`: In-memory graph loading, graph merging, and JSON export utilities.
+- `local_graphify.py`: NetworkX graph construction (`build_from_json`) and community detection (`cluster`).
+- `normalizer.py`: Text, ID, and Hebrew character normalization routines (`GraphNormalizer`).
+- `ontology_enricher.py`: Structural relationship enrichment based on schema ontology definitions.
 
-## Partitioning Rule
+## Partitioning & Data Isolation Rule
 
-Cosmos graph access must stay scoped to the active investigation case. The active case ID is carried as `doc_id` in the pipeline and as `pk` on graph records/traversals.
+Cosmos DB Gremlin graph access MUST remain strictly partitioned by investigation case:
+- Every vertex and edge stored in Cosmos DB carries a partition key property `pk = doc_id`.
+- All Gremlin queries and traversals must include `.has('pk', doc_id)` or pass `pk` parameters (e.g. `g.V().has('pk', pk)...`).
+- Unpartitioned global scans are strictly prohibited in user-facing query agent paths.
 
-Do not add graph reads or writes that scan globally unless the caller explicitly requests global diagnostics.
+## Pipeline Integration & Community Pre-Detection
 
-## Inputs And Outputs
+During `activity_final_indexing`:
+1. `local_graphify.cluster(G)` runs NetworkX community detection on the merged graph.
+2. The detected `community` ID is mapped onto every node in `graph_data["nodes"]`.
+3. `cosmos_mgr.sync_graph(graph_data)` syncs vertices and edges (including `community` properties) to Cosmos DB.
+4. Final graph JSON is persisted to `graph/{doc_id}/final.json`.
 
-Typical input:
+## Maintainer Notes
 
-- merged extraction JSON with `nodes`, `edges`, and resolution metadata.
-
-Typical outputs:
-
-- final graph JSON artifacts in Blob/Azurite storage.
-- Cosmos vertices and edges for the same `doc_id`/`pk`.
-- NetworkX graph objects consumed by reporting.
-
-## Notes For Maintainers
-
-- Keep graph metadata additive; downstream reports, protocol completeness, and frontend graph views depend on source references.
-- Prefer deterministic normalization before LLM-based disambiguation.
-- Keep Gremlin queries parameterized and partition scoped.
+- Keep graph node and edge metadata additive; downstream reporting and auditability rely on source references (`source_file`, `source_location`).
+- Ensure all Gremlin queries use parameters (`bindings`) to prevent injection risks and enable query plan caching.

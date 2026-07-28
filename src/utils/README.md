@@ -1,34 +1,50 @@
 # Utilities Module
 
-`src/utils/` contains cross-cutting helpers used by ingestion, reporting, querying, and operations.
+`src/utils/` contains cross-cutting helpers for settings management, dynamic prompt loading, JSON repair, Hebrew text normalization, and structured observability logging.
 
-## Current Components
+## Components
 
-- `config.py`: Pydantic settings for Azure OpenAI, Azure Search, Cosmos DB, Storage, Document Intelligence, and runtime flags.
-- `config_manager.py`: schema/config loading helpers.
-- `json_repair.py`: defensive JSON repair for malformed or truncated LLM output.
-- `model_helpers.py`: normalization helpers used by Pydantic models and extraction post-processing.
-- `bidi_utils.py`: Hebrew/right-to-left text utilities for readable output.
-- `observability.py`: structured `[OBS]` event/metric logging, trace ID extraction, secret redaction, and field truncation.
+- `config.py`: Pydantic settings loading environment variables for Azure OpenAI, Azure AI Search, Azure AI Document Intelligence, Cosmos DB Gremlin, Azure Storage, and runtime execution flags (`settings`).
+- `config_manager.py`: Async file configuration and system prompt loader (`config_manager`) reading templates from `prompts/`.
+- `json_repair.py`: Defensive JSON extraction and node repair (`_extract_json_payload`, `_repair_json_nodes`) for malformed or truncated LLM completions.
+- `model_helpers.py`: Model string sanitization and normalization utilities.
+- `bidi_utils.py`: Right-To-Left (RTL) and Hebrew text display formatting (`fix_text`).
+- `observability.py`: Structured `[OBS]` event and metric logging (`log_event`, `log_metric`), trace ID extraction (`trace_id_from_request`), secret redaction, and parameter truncation.
 
-## Observability Helpers
+## Dynamic Prompt System (`config_manager.py` & `settings.get_prompt`)
 
-Use `log_event` for structured operational events:
+System prompts and template instructions are externalized in `prompts/` and loaded dynamically:
 
 ```python
-log_event("query.completed", trace_id=trace_id, doc_id=doc_id, duration_ms=elapsed_ms)
+# Loading system prompts from prompts/
+raw_template = await settings.get_prompt("extraction_prompt_full")
 ```
 
-Use `log_metric` for count or latency measurements:
+`settings.get_prompt` performs template substitution (e.g. replacing `{groundedness_instruction}` or `{legal_role_map}`) and caches loaded prompt templates in memory.
+
+## Structured Observability (`observability.py`)
+
+All Function App HTTP endpoints, Durable Functions activities, and LangGraph nodes emit JSON logs prefixed with `[OBS]`:
+
+```python
+log_event(
+    "query.langgraph.route.selected",
+    trace_id=trace_id,
+    doc_id=doc_id,
+    node="coordinator",
+    route="parallel",
+)
+```
+
+Metric events log numeric measurements:
 
 ```python
 log_metric("query_duration_ms", elapsed_ms, unit="ms", doc_id=doc_id)
 ```
 
-Trace IDs should be read from `x-mag-trace-id` with `trace_id_from_request`. Values are normalized and generated with a prefix when absent.
+Trace IDs are extracted from the `x-mag-trace-id` request header using `trace_id_from_request`.
 
 ## Maintainer Notes
 
-- Do not log secrets, keys, tokens, SAS URLs, or full connection strings.
-- Keep helper behavior deterministic; this package is used in tests and Durable activities.
-- Prefer adding shared parsing/normalization here only when it is reused across modules.
+- **Secrets Safety**: `observability.py` automatically redacts secrets and connection strings. Do not print raw settings objects containing API keys.
+- **Side Effects**: Keep utility helpers pure and deterministic so they can be safely invoked within Durable activities and test fixtures.

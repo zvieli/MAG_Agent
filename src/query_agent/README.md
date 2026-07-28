@@ -1,51 +1,69 @@
 # Query Agent Module
 
-`src/query_agent/` implements the investigative reasoning layer used by `POST /api/query`.
+`src/query_agent/` implements the investigative reasoning layer used by `POST /api/query` and background verification routines.
 
-The query workload is Durable-orchestrated in `function_app.py`; the activity creates a stateless `QueryAgent`, answers against the active case, and returns the answer plus updated state.
+The query workload is Durable-orchestrated in `function_app.py`. The activity creates a stateless `QueryAgent`, executes an investigative state machine against the requested case (`doc_id`), and returns the final answer along with serialized conversation state.
 
 ## Responsibilities
 
-- Answer Hebrew investigation questions from graph data and source chunks.
-- Keep all retrieval scoped to the requested `doc_id`.
-- Combine graph traversals, Azure AI Search chunk retrieval, ontology checks, and synthesis.
-- Return JSON-serializable state so the frontend can continue a conversation.
-- Emit query observability through the Function App trace ID.
+- Answer Hebrew investigation questions strictly grounded in graph evidence and source document chunks.
+- Enforce strict per-case partition isolation using `doc_id` across all Cosmos DB Gremlin queries and Azure AI Search retrieval calls.
+- Execute dynamic routing across graph traversals, vector search, synthesis, and fact extraction using LangGraph `Command`.
+- Support Human-In-The-Loop (HITL) fact ledger approvals (`VerifiedFact`, `PendingFactApproval`).
+- Protect against infinite loops and recursion limits (`remaining_steps <= 2`).
+- Emit structured `[OBS]` observability events correlated with `x-mag-trace-id`.
 
-## Current Components
+## State Machine Nodes & Dynamic Routing
 
-- `query_agent.py`: outer agent runtime, tool definitions, and stateless answer API.
-- `nodes.py`: graph/state-machine node functions used by the query flow.
-- `state.py`: Pydantic state models for messages, verified facts, pending approvals, and transient retrieval data.
-- `ontology_engine.py`: ontology and structural rule checks over graph data.
-- `graph_query_builder.py`: helper for building graph queries in controlled cases.
+The query agent uses a compiled LangGraph state machine (`src/query_agent/nodes.py`) with dynamic `Command(goto=...)` routing:
 
-## Runtime Flow
+```mermaid
+graph TD
+    START((START)) --> Hydrate[hydrate]
+    Hydrate -->|Pending Feedback| ProcessHITL[process_hitl]
+    Hydrate -->|Normal| Coordinator[coordinator]
+    ProcessHITL --> Planner[planner]
+    Coordinator -->|Parallel| DocBranch[doc_branch]
+    Coordinator -->|Parallel| GraphBranch[graph_branch]
+    Coordinator -->|Finalize| Finalizer[finalizer]
+    DocBranch --> Synthesis[synthesis]
+    GraphBranch --> Synthesis[synthesis]
+    Synthesis --> Extraction[extraction]
+    Extraction -->|Fact Pending| HaltHITL[halt_for_hitl]
+    Extraction -->|No Fact| Planner[planner]
+    HaltHITL --> END((END))
+    Planner -->|Plan Left| Coordinator[coordinator]
+    Planner -->|Plan Done / Step Limit| Finalizer[finalizer]
+    Finalizer --> END((END))
+```
 
-1. `POST /api/query` receives `{ "doc_id": "...", "question": "...", "state": ... }`.
-2. The HTTP route reads or creates `x-mag-trace-id` and starts `query_orchestrator`.
-3. The orchestrator sets custom status with `phase`, `doc_id`, `trace_id`, and `last_error`.
-4. `activity_query_investigation` creates `QueryAgent(doc_id=..., stateless=True)`.
-5. The agent retrieves graph/source evidence and returns `{ "answer": "...", "state": ..., "trace_id": "..." }`.
+### Component Files
 
-## Observability
+- `query_agent.py`: High-level `QueryAgent` class exposing the stateless `answer_question` API and tool definitions.
+- `nodes.py`: Implementation of graph nodes (`hydrate_node`, `process_hitl_node`, `coordinator_node`, `doc_branch_node`, `graph_branch_node`, `synthesis_node`, `extraction_node`, `halt_for_hitl_node`, `planner_node`, `finalizer_node`).
+- `state.py`: Pydantic state definitions (`InvestigationState`, `InvestigationInputState`, `InvestigationOutputState`, `VerifiedFact`, `PendingFactApproval`, `ChatMessage`, `AssistantMessage`).
+- `ontology_engine.py`: Rules engine for ontology rule checks and Gremlin pushdown evaluation over Cosmos DB.
+- `graph_query_builder.py`: Query builder helper for complex Gremlin traversals.
 
-Expected structured events:
+## Observability Events
 
 - `query.started`
 - `query.orchestrator_started`
+- `query.langgraph.node.started`
+- `query.langgraph.plan.created`
+- `query.langgraph.route.selected`
+- `query.langgraph.doc_search.executed`
+- `query.langgraph.graph_action.selected`
+- `query.langgraph.synthesis.completed`
+- `query.langgraph.extraction.completed`
+- `query.langgraph.hitl.pending`
+- `query.langgraph.hitl.processed`
+- `query.langgraph.finalized`
 - `query.completed`
 - `query.failed`
-- metric events: `query_success_count`, `query_duration_ms`, `query_failure_count`
-
-Trace local logs with:
-
-```bash
-docker compose logs --tail=1000 function-app | rg "<query-trace-id>|query\\."
-```
 
 ## Maintainer Notes
 
-- Do not bypass `doc_id`; global graph queries are unsafe for normal user-facing answers.
-- Keep large retrieval details in transient state fields and prune them before returning to the client.
-- Keep final answers grounded in retrieved source text or graph facts.
+- **Partition Isolation**: Never execute un-partitioned graph or vector queries; `doc_id` MUST be passed to all retrieval methods.
+- **Fact Ledger**: Final answers generated in `finalizer_node` must be strictly derived from `verified_facts` in state to prevent hallucination.
+- **State Sanitization**: Intermediate transient search results (`transient_doc_results`, `transient_graph_results`) must be pruned before state is returned to the client to minimize payload size.
