@@ -112,3 +112,8 @@ async def test_activity_final_indexing_cleans_up_merged_path():
         assert final_path == "cosmos://test_doc"
         # Verify the temporary partial graph was deleted
         mock_store.delete.assert_called_with(merged_graph_path)
+        # Verify delete_folder calls preserve extracted/ folder
+        deleted_folders = [call.args[0] for call in mock_store.delete_folder.call_args_list]
+        assert "chunks/test_doc" in deleted_folders
+        assert "uploads" in deleted_folders
+        assert "extracted/test_doc" not in deleted_folders

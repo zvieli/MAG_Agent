@@ -176,3 +176,51 @@ async def test_doc_branch_node_parses_json_query():
         mock_provider_instance.search_chunks_raw.assert_called_once_with(
             "semantic text", top_k=6, keyword_query="keyword text"
         )
+
+
+@pytest.mark.asyncio
+async def test_build_prompt_loading_and_structure_printing():
+    """
+    Test prompt loading structure for graph extraction in _build_prompt,
+    printing the complete formatted prompt to stdout and asserting static prefix vs dynamic suffix ordering.
+    """
+    from src.extraction.extraction_engine import _build_prompt
+    from src.models.models import SCHEMA_CONFIG
+
+    sample_chunk_text = "בנימין נתניהו נערכה פגישה עם שאול אלוביץ' בתיק 4000."
+    deterministic_entities = [{"label": "בנימין נתניהו", "type": "PERSON"}]
+    chunk_label = "Chunk 00001"
+
+    prompt = await _build_prompt(
+        sample_chunk_text,
+        SCHEMA_CONFIG,
+        chunk_label=chunk_label,
+        deterministic_entities=deterministic_entities,
+    )
+
+    # Print full structured prompt to stdout for visibility
+    print("\n" + "=" * 80)
+    print("FULL STRUCTURED EXTRACTION PROMPT:")
+    print("=" * 80)
+    print(prompt)
+    print("=" * 80 + "\n")
+
+    # Assert static prefix vs dynamic suffix structure ordering for Azure OpenAI Prompt Caching
+    entity_idx = prompt.find("### ENTITY TYPES DEFINITIONS")
+    relation_idx = prompt.find("### RELATION TYPES DEFINITIONS")
+    confidence_idx = prompt.find("### CONFIDENCE LEVELS DEFINITIONS")
+    deterministic_idx = prompt.find("PRE-EXTRACTED ENTITIES")
+    context_idx = prompt.find(f"CONTEXT: CHUNK WINDOW: {chunk_label}")
+    text_idx = prompt.find(f"TEXT:\n{sample_chunk_text}")
+
+    assert entity_idx != -1, "Missing ### ENTITY TYPES DEFINITIONS in prompt"
+    assert relation_idx != -1, "Missing ### RELATION TYPES DEFINITIONS in prompt"
+    assert confidence_idx != -1, "Missing ### CONFIDENCE LEVELS DEFINITIONS in prompt"
+    assert deterministic_idx != -1, "Missing PRE-EXTRACTED ENTITIES in prompt"
+    assert context_idx != -1, "Missing CONTEXT block in prompt"
+    assert text_idx != -1, "Missing TEXT block in prompt"
+
+    # Verify Static Prefix precedes Dynamic Suffix (deterministic findings, chunk context, chunk text)
+    assert entity_idx < relation_idx < confidence_idx < deterministic_idx < context_idx < text_idx, (
+        "Prompt structure violated: Static ontology definitions must precede dynamic per-chunk elements"
+    )

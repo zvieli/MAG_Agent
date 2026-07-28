@@ -80,6 +80,7 @@ export class ReportService implements IReportService {
       throw new Error(`Verification request failed: ${response.statusText}`);
     }
     const data = await response.json();
+    await browserCache.set(`protocol_completeness:${docId}`, null, 0);
     return data.statusQueryGetUri || data.status_uri || '';
   }
 

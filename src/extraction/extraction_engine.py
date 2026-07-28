@@ -236,7 +236,7 @@ def _response_token_usage(
         completion_text (str): The completion text from the response.
 
     Returns:
-        Dict[str, int]: A dictionary with 'input_tokens', 'output_tokens', and 'total_tokens'.
+        Dict[str, int]: A dictionary with 'input_tokens', 'output_tokens', 'cached_tokens', and 'total_tokens'.
     """
     usage = getattr(response, "usage", None)
     input_tokens = getattr(usage, "prompt_tokens", None) or _estimate_token_count(
@@ -245,9 +245,15 @@ def _response_token_usage(
     output_tokens = getattr(usage, "completion_tokens", None) or _estimate_token_count(
         completion_text
     )
+    prompt_tokens_details = getattr(usage, "prompt_tokens_details", None)
+    cached_tokens = 0
+    if prompt_tokens_details:
+        cached_tokens = getattr(prompt_tokens_details, "cached_tokens", 0) or 0
+
     return {
         "input_tokens": int(input_tokens),
         "output_tokens": int(output_tokens),
+        "cached_tokens": int(cached_tokens),
         "total_tokens": int(input_tokens) + int(output_tokens),
     }
 
@@ -569,10 +575,10 @@ async def _build_prompt(
         f"### ENTITY TYPES DEFINITIONS\n{entity_table}\n\n"
         f"### RELATION TYPES DEFINITIONS\n{relation_table}\n\n"
         f"### CONFIDENCE LEVELS DEFINITIONS\n{confidence_table}\n\n"
-        f"{deterministic_str}\n\n"
         f"{schema_instructions}\n\n"
         f"{json_format}\n\n"
         f"{guidelines_instructions}\n\n"
+        f"{deterministic_str}\n\n"
         f"CONTEXT: {chunk_context}\n\n"
         f"TEXT:\n{chunk_text}"
     )

@@ -2,6 +2,7 @@ import json
 import logging
 import asyncio
 import os
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -253,7 +254,26 @@ async def run_chunking(
                 file_bytes[:10],
             )
 
-        pages = await _load_document_pages_via_di(file_bytes)
+        pdf_hash = hashlib.sha256(file_bytes).hexdigest() if file_bytes else "empty"
+        di_cache_path = f"di_cache/{pdf_hash}.json"
+
+        pages = None
+        if await asyncio.to_thread(store.exists, di_cache_path):
+            try:
+                cached_bytes = await asyncio.to_thread(store.read_bytes, di_cache_path)
+                pages = json.loads(cached_bytes.decode("utf-8"))
+                logging.info("[ACTIVITY][CHUNKING] Document Intelligence layout cache hit: %s", di_cache_path)
+            except Exception as exc:
+                logging.warning("[ACTIVITY][CHUNKING] Failed to read DI layout cache: %s", exc)
+
+        if pages is None:
+            pages = await _load_document_pages_via_di(file_bytes)
+            try:
+                cache_payload = json.dumps(pages, ensure_ascii=False, indent=2).encode("utf-8")
+                await asyncio.to_thread(store.write_bytes, di_cache_path, cache_payload)
+                logging.info("[ACTIVITY][CHUNKING] Saved Document Intelligence layout cache: %s", di_cache_path)
+            except Exception as exc:
+                logging.warning("[ACTIVITY][CHUNKING] Failed to write DI layout cache: %s", exc)
     else:
         pages = await asyncio.to_thread(_load_document_pages, input_blob_path, store)
 
@@ -626,9 +646,9 @@ async def activity_final_indexing(merged_graph_path: str) -> str:
         except Exception as e:
             logging.warning(f"[CLEANUP] Failed to delete merged graph {merged_graph_path}: {e}")
 
-        # Idempotent cleanup of temporary chunk and extracted folders, as well as uploads and caches for stateless design
+        # Idempotent cleanup of temporary chunk folders and uploads for stateless design
         try:
-            for folder_prefix in [f"chunks/{doc_id}", f"extracted/{doc_id}", "uploads", "extraction_cache"]:
+            for folder_prefix in [f"chunks/{doc_id}", "uploads"]:
                 await asyncio.to_thread(store.delete_folder, folder_prefix)
             logging.info(f"Successfully cleaned up temporary artifacts for {doc_id}")
         except Exception as e:
