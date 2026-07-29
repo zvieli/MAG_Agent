@@ -1,9 +1,12 @@
+from __future__ import annotations
+
 import asyncio
 import json
 import logging
 from typing import Any, Dict, List, Optional
 from gremlin_python.driver import client, serializer
 from src.utils.config import settings
+from src.tools.contracts import GraphQueryInput, GraphQueryResult, ToolExecutionError
 
 
 MAX_COMPACT_PREVIEW_ITEMS = 3
@@ -669,3 +672,72 @@ class CosmosGremlinManager:
             logging.info(
                 "[COSMOS] [CONN_TERMINATE] [SUCCESS] | Message: Connection resources released cleanly"
             )
+
+    async def execute_graph_query(
+        self,
+        payload: Dict[str, Any] | GraphQueryInput,
+    ) -> GraphQueryResult | ToolExecutionError:
+        """Executes a Gremlin graph query with strict doc_id partition validation and Pydantic contracts."""
+        import time
+        from src.tools.contracts import (
+            GraphQueryInput,
+            GraphQueryResult,
+            GraphNodeItem,
+            ToolExecutionError,
+        )
+
+        start_time = time.time()
+        try:
+            input_data = (
+                payload if isinstance(payload, GraphQueryInput) else GraphQueryInput.model_validate(payload)
+            )
+        except Exception as err:
+            return ToolExecutionError(
+                error_code="INVALID_GRAPH_PAYLOAD",
+                error_message=f"Graph payload validation failed: {err}",
+                tool_name="cosmos_gremlin",
+                retryable=False,
+            )
+
+        if not input_data.doc_id:
+            return ToolExecutionError(
+                error_code="MISSING_PARTITION_KEY",
+                error_message="doc_id partition key is mandatory for all graph queries",
+                tool_name="cosmos_gremlin",
+                retryable=False,
+            )
+
+        try:
+            results = await self.execute_query(input_data.gremlin_query)
+            nodes: List[GraphNodeItem] = []
+            for item in (results or [])[: input_data.max_nodes]:
+                if isinstance(item, dict):
+                    nodes.append(
+                        GraphNodeItem(
+                            id=str(item.get("id", "")),
+                            name=str(item.get("name", item.get("id", ""))),
+                            label=str(item.get("label", "entity")),
+                            doc_id=input_data.doc_id,
+                            properties=item,
+                        )
+                    )
+            duration_ms = round((time.time() - start_time) * 1000, 2)
+            raw_preview = json.dumps(results[:3], ensure_ascii=False) if results else "[]"
+            return GraphQueryResult(
+                doc_id=input_data.doc_id,
+                nodes_count=len(nodes),
+                nodes=nodes,
+                raw_preview=raw_preview[:1000],
+                duration_ms=duration_ms,
+            )
+        except Exception as e:
+            duration_ms = round((time.time() - start_time) * 1000, 2)
+            return ToolExecutionError(
+                error_code="GRAPH_EXECUTION_FAILED",
+                error_message=str(e),
+                tool_name="cosmos_gremlin",
+                doc_id=input_data.doc_id,
+                retryable=True,
+                details={"duration_ms": duration_ms},
+            )
+

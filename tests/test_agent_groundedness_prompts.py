@@ -1,73 +1,8 @@
-import sys
-from unittest.mock import MagicMock, AsyncMock
-
-# Mocking all heavy dependencies before importing src.query_agent.nodes
-mock_modules = [
-    "src.extraction.extraction_engine",
-    "src.processing.cloud_knowledge_provider",
-    "src.storage.search_manager",
-    "src.graph.cosmos_manager",
-    "src.query_agent.ontology_engine",
-    "src.models.models",
-    "src.utils.observability",
-    "langgraph.graph",
-    "langgraph.types",
-    "langchain_core.runnables"
-]
-
-# Save original modules to prevent leakage to other test files
-original_modules = {}
-for mod in mock_modules:
-    if mod in sys.modules:
-        original_modules[mod] = sys.modules[mod]
-
-for mod in mock_modules:
-    sys.modules[mod] = MagicMock()
-
-# Setup config_manager mock before imports to prevent filesystem loading failures in tests
-class MockConfigManager:
-    async def get_config(self, filename, category="prompts"):
-        if filename == "synthesis_system.md":
-            return "base_synthesis_system_prompt_content"
-        elif filename == "finalizer_system.md":
-            return "base_finalizer_system_prompt_content"
-        elif filename == "query_groundedness_instruction.md":
-            return "CITATION RULES:\nEvery fact or claim in your response MUST end with a source citation."
-        elif filename == "query_no_apologies_rule.md":
-            return "Do not apologize."
-        elif filename == "query_routing_instructions_default.md":
-            return "Routing instructions."
-        elif filename == "agent_system_prompt.md":
-            return "System Prompt: {groundedness_instruction}"
-        return "mock_content"
-
-    async def get_json_config(self, filename, category="schemas"):
-        return {}
-
-# Save original config_manager if exists
-orig_config_manager = sys.modules.get("src.utils.config_manager")
-sys.modules["src.utils.config_manager"] = MagicMock()
-from src.utils.config_manager import config_manager
-config_manager.get_config = AsyncMock(side_effect=MockConfigManager().get_config)
-config_manager.get_json_config = AsyncMock(side_effect=MockConfigManager().get_json_config)
-
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, AsyncMock, MagicMock
 from src.utils.config import settings
 from src.query_agent.state import InvestigationState
 from src.query_agent.nodes import synthesis_node, finalizer_node
-
-# Restore sys.modules immediately after imports
-for mod in mock_modules:
-    if mod in original_modules:
-        sys.modules[mod] = original_modules[mod]
-    else:
-        sys.modules.pop(mod, None)
-
-if orig_config_manager:
-    sys.modules["src.utils.config_manager"] = orig_config_manager
-else:
-    sys.modules.pop("src.utils.config_manager", None)
 
 
 @pytest.mark.asyncio

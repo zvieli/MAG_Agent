@@ -7,7 +7,11 @@ from langgraph.graph import StateGraph, END, START
 from langgraph.types import Command
 
 from src.utils.config import settings
-from src.extraction.extraction_engine import _build_azure_client
+
+def _build_azure_client():
+    from src.extraction.extraction_engine import _build_azure_client as build_client
+    return build_client()
+
 from src.processing.cloud_knowledge_provider import CloudKnowledgeProvider
 from src.storage.search_manager import SearchManager
 from src.graph.cosmos_manager import CosmosGremlinManager
@@ -23,7 +27,7 @@ from src.query_agent.state import (
     AssistantMessage,
     ChatMessage
 )
-from src.utils.observability import log_event
+from src.utils.observability import log_event, log_trajectory_step
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +72,17 @@ def trim_messages(messages: List[ChatMessage], max_history: int = 10) -> List[Ch
     other_msgs = [m for m in messages if not ((isinstance(m, dict) and m.get("role") == "system") or getattr(m, "role", "") == "system")]
     return system_msgs + other_msgs[-max_history:]
 
-# Core LLM call helper
-async def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 1000, temperature: float = 0.0) -> str:
+# Core LLM call helper with token trajectory tracking
+async def call_llm(
+    system_prompt: str,
+    user_prompt: str,
+    max_tokens: int = 1000,
+    temperature: float = 0.0,
+    step_name: str = "llm_invocation",
+) -> str:
     client = _build_azure_client()
     model = settings.graphify_agent_model or "gpt-4o"
+    start_time = time.time()
     try:
         response = await client.chat.completions.create(
             model=model,
@@ -83,10 +94,58 @@ async def call_llm(system_prompt: str, user_prompt: str, max_tokens: int = 1000,
             max_tokens=max_tokens,
             timeout=settings.llm_request_timeout_seconds,
         )
-        return response.choices[0].message.content.strip()
+        content = response.choices[0].message.content.strip()
+        usage = getattr(response, "usage", None)
+        prompt_tokens = getattr(usage, "prompt_tokens", 0) if usage else 0
+        completion_tokens = getattr(usage, "completion_tokens", 0) if usage else 0
+        duration_ms = round((time.time() - start_time) * 1000, 2)
+
+        log_trajectory_step(
+            step_name=step_name,
+            model_name=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            duration_ms=duration_ms,
+        )
+        return content
     except Exception as e:
+        duration_ms = round((time.time() - start_time) * 1000, 2)
+        log_trajectory_step(
+            step_name=step_name,
+            model_name=model,
+            error=str(e),
+            duration_ms=duration_ms,
+        )
         logger.error(f"[nodes] LLM invocation failed: {e}")
         raise
+
+
+async def policy_validation_node(state: InvestigationState, config: RunnableConfig) -> Command[Literal["coordinator", END]]:
+    """Deterministic policy validation gate to ensure partition isolation & safety rules."""
+    node_name = "policy_validation"
+    _log_node_started(state, config, node_name)
+    logger.info(f"[policy_validation_node] Validating partition isolation for doc_id={state.doc_id}")
+
+    if not state.doc_id or not state.doc_id.strip():
+        err_msg = "MISSING_DOC_ID_PARTITION: doc_id partition key is mandatory."
+        logger.error(f"[policy_validation] {err_msg}")
+        state.errors.append(err_msg)
+        log_trajectory_step("policy_validation", doc_id=state.doc_id, error=err_msg)
+        return Command(goto=END, update={"errors": state.errors})
+
+    # Validate that prompt injection attempt patterns aren't present in current task
+    task = state.current_task or ""
+    forbidden_tokens = ["IGNORE SYSTEM INSTRUCTIONS", "DROP TABLE", "DELETE VERTEX"]
+    if any(token in task.upper() for token in forbidden_tokens):
+        err_msg = "PROMPT_INJECTION_DETECTED: Forbidden instruction tokens found in request."
+        logger.warning(f"[policy_validation] {err_msg}")
+        state.errors.append(err_msg)
+        log_trajectory_step("policy_validation", doc_id=state.doc_id, error=err_msg)
+        return Command(goto=END, update={"errors": state.errors})
+
+    log_trajectory_step("policy_validation", doc_id=state.doc_id, tool_status="passed")
+    return Command(goto="coordinator")
+
 
 async def rerank_chunks_llm(query: str, chunks: List[Dict[str, Any]], top_n: int = 5) -> List[Dict[str, Any]]:
     if not chunks:
@@ -119,7 +178,7 @@ async def rerank_chunks_llm(query: str, chunks: List[Dict[str, Any]], top_n: int
 
 
 # Node 1: Hydrate Node (Validation)
-async def hydrate_node(state: InvestigationState, config: RunnableConfig) -> Command[Literal["process_hitl", "coordinator"]]:
+async def hydrate_node(state: InvestigationState, config: RunnableConfig) -> Command[Literal["process_hitl", "policy_validation"]]:
     node_name = "hydrate"
     step = _metadata(config).get("langgraph_step", 1)
     _log_node_started(state, config, node_name)
@@ -133,7 +192,7 @@ async def hydrate_node(state: InvestigationState, config: RunnableConfig) -> Com
         logger.error(f"[hydrate_node] Unauthorized access attempt to doc_id: {state.doc_id}")
         raise PermissionError(f"Unauthorized access to document partition: {state.doc_id}")
 
-    goto = "coordinator"
+    goto = "policy_validation"
     if state.pending_fact_approval is not None and state.user_feedback is not None:
         goto = "process_hitl"
 
@@ -677,6 +736,7 @@ def get_investigative_graph():
     )
     
     builder.add_node("hydrate", hydrate_node)
+    builder.add_node("policy_validation", policy_validation_node)
     builder.add_node("process_hitl", process_hitl_node)
     builder.add_node("coordinator", coordinator_node)
     builder.add_node("doc_branch", doc_branch_node)

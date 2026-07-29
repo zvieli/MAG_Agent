@@ -1,6 +1,8 @@
+from __future__ import annotations
+
 import logging
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, TYPE_CHECKING
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents.aio import SearchClient
 from azure.search.documents.indexes.aio import SearchIndexClient
@@ -17,6 +19,7 @@ from azure.search.documents.indexes.models import (
     ExhaustiveKnnParameters,
 )
 from src.utils.config import settings
+from src.tools.contracts import SearchQueryInput, SearchQueryResult, ToolExecutionError
 
 logger = logging.getLogger(__name__)
 
@@ -198,3 +201,69 @@ class SearchManager:
 
         # Allow only letters, numbers, dashes, underscores
         return re.sub(r"[^a-zA-Z0-9_-]", "_", doc_id)
+
+    async def execute_search_query(
+        self,
+        payload: Dict[str, Any] | SearchQueryInput,
+    ) -> SearchQueryResult | ToolExecutionError:
+        """Executes document search with Pydantic input/output contract enforcement."""
+        import time
+        from src.tools.contracts import (
+            SearchQueryInput,
+            SearchQueryResult,
+            SearchChunkItem,
+            ToolExecutionError,
+        )
+
+        start_time = time.time()
+        try:
+            input_data = (
+                payload if isinstance(payload, SearchQueryInput) else SearchQueryInput.model_validate(payload)
+            )
+        except Exception as err:
+            return ToolExecutionError(
+                error_code="INVALID_TOOL_PAYLOAD",
+                error_message=f"Search payload validation failed: {err}",
+                tool_name="azure_ai_search",
+                retryable=False,
+            )
+
+        try:
+            client = self.get_search_client(settings.azure_search_index)
+            filter_str = f"doc_id eq '{input_data.doc_id}'" if input_data.doc_id else None
+            results = await client.search(
+                search_text=input_data.query,
+                top=input_data.top_k,
+                filter=filter_str,
+            )
+            chunks: List[SearchChunkItem] = []
+            async for item in results:
+                score = float(item.get("@search.score", 0.0))
+                if score >= input_data.min_score:
+                    chunks.append(
+                        SearchChunkItem(
+                            chunk_id=str(item.get("id", "")),
+                            doc_id=str(item.get("doc_id", input_data.doc_id)),
+                            text=str(item.get("text", "")),
+                            score=score,
+                            source_location=item.get("source_location"),
+                        )
+                    )
+            duration_ms = round((time.time() - start_time) * 1000, 2)
+            return SearchQueryResult(
+                doc_id=input_data.doc_id,
+                total_found=len(chunks),
+                chunks=chunks,
+                duration_ms=duration_ms,
+            )
+        except Exception as e:
+            duration_ms = round((time.time() - start_time) * 1000, 2)
+            return ToolExecutionError(
+                error_code="SEARCH_EXECUTION_FAILED",
+                error_message=str(e),
+                tool_name="azure_ai_search",
+                doc_id=input_data.doc_id,
+                retryable=True,
+                details={"duration_ms": duration_ms},
+            )
+

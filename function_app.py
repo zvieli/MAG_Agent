@@ -22,7 +22,7 @@ from src.utils.config import settings
 from src.operations.dependency_checker import DependencyChecker
 from src.query_agent.query_agent import QueryAgent
 from src.models.models import SCHEMA_CONFIG  # noqa: F401 # Forces loading schema into memory cache during worker init
-from src.utils.observability import log_event, log_metric, trace_id_from_request
+from src.utils.observability import calculate_estimated_cost, log_event, log_metric, trace_id_from_request
 
 # Initialize the Durable Functions App (Python V2 Model)
 app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -1174,6 +1174,31 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
         )
 
         if not context.is_replaying:
+            total_prompt_tokens = sum(
+                r.get("token_usage", {}).get("prompt_tokens", 0)
+                for r in extraction_results
+                if isinstance(r, dict)
+            )
+            total_completion_tokens = sum(
+                r.get("token_usage", {}).get("completion_tokens", 0)
+                for r in extraction_results
+                if isinstance(r, dict)
+            )
+            total_tokens = total_prompt_tokens + total_completion_tokens
+            model_name = getattr(settings, "graphify_agent_model", "gpt-4o") or "gpt-4o"
+            total_cost_usd = calculate_estimated_cost(total_prompt_tokens, total_completion_tokens, model_name=model_name)
+
+            log_event(
+                "pipeline.ingestion.summary",
+                trace_id=trace_id,
+                doc_id=doc_id,
+                total_prompt_tokens=total_prompt_tokens,
+                total_completion_tokens=total_completion_tokens,
+                total_tokens=total_tokens,
+                total_cost_usd=total_cost_usd,
+                chunks_processed_count=len(extraction_results),
+            )
+
             log_event(
                 "pipeline.completed",
                 trace_id=trace_id,

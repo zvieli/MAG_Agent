@@ -50,9 +50,12 @@ class InvestigationBaseState(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     doc_id: str = Field(description="Active investigation document partition ID context")
+    session_id: Optional[str] = Field(default=None, description="Persistent multi-turn investigation session ID")
+    turn_index: int = Field(default=0, description="Sequential turn counter for current multi-turn session")
     investigation_plan: List[str] = Field(default_factory=list, description="Pending investigative tasks")
     verified_facts: List[VerifiedFact] = Field(default_factory=list, description="Ledger of Admissible Facts")
     explored_entities: List[str] = Field(default_factory=list, description="Visited entities to prevent infinite loops")
+    trajectory_trace: List[Dict[str, Any]] = Field(default_factory=list, description="Audit ledger of trajectory step spans")
     current_task: Optional[str] = None
     messages: List[ChatMessage] = Field(default_factory=list, description="Conversation messages and thoughts")
     errors: List[str] = Field(default_factory=list, description="Warning/error traces")

@@ -29,6 +29,30 @@ def test_sanitize_observability_value_redacts_sensitive_fields_and_truncates():
     assert "truncated" in sanitized["long"]
 
 
+def test_sanitize_observability_value_preserves_token_count_metrics():
+    payload = {
+        "tokens_in": 150,
+        "tokens_out": 45,
+        "total_tokens": 195,
+        "prompt_tokens": 150,
+        "completion_tokens": 45,
+        "max_tokens": 1000,
+        "token": "secret-auth-token",
+        "access_token": "secret-access-token",
+    }
+
+    sanitized = sanitize_observability_value(payload)
+
+    assert sanitized["tokens_in"] == 150
+    assert sanitized["tokens_out"] == 45
+    assert sanitized["total_tokens"] == 195
+    assert sanitized["prompt_tokens"] == 150
+    assert sanitized["completion_tokens"] == 45
+    assert sanitized["max_tokens"] == 1000
+    assert sanitized["token"] == "[redacted]"
+    assert sanitized["access_token"] == "[redacted]"
+
+
 def test_trace_id_from_request_uses_header_and_normalizes():
     req = MagicMock()
     req.headers = {TRACE_HEADER: "query abc/123"}
@@ -90,3 +114,40 @@ def test_pipeline_input_payload_supports_legacy_and_structured_inputs(value, exp
     from function_app import _pipeline_input_payload
 
     assert _pipeline_input_payload(value) == expected
+
+
+def test_ingestion_summary_event_accumulation(caplog):
+    from src.utils.observability import calculate_estimated_cost, log_event
+
+    caplog.set_level(logging.INFO, logger="src.utils.observability")
+
+    extraction_results = [
+        {"token_usage": {"prompt_tokens": 1000, "completion_tokens": 200}},
+        {"token_usage": {"prompt_tokens": 1500, "completion_tokens": 300}},
+    ]
+
+    total_prompt_tokens = sum(r["token_usage"]["prompt_tokens"] for r in extraction_results)
+    total_completion_tokens = sum(r["token_usage"]["completion_tokens"] for r in extraction_results)
+    total_tokens = total_prompt_tokens + total_completion_tokens
+    total_cost_usd = calculate_estimated_cost(total_prompt_tokens, total_completion_tokens, model_name="gpt-4o")
+
+    log_event(
+        "pipeline.ingestion.summary",
+        doc_id="case_summary_test",
+        total_prompt_tokens=total_prompt_tokens,
+        total_completion_tokens=total_completion_tokens,
+        total_tokens=total_tokens,
+        total_cost_usd=total_cost_usd,
+        chunks_processed_count=len(extraction_results),
+    )
+
+    assert caplog.records
+    message = caplog.records[-1].getMessage()
+    payload = json.loads(message.replace("[OBS] ", "", 1))
+    assert payload["event"] == "pipeline.ingestion.summary"
+    assert payload["doc_id"] == "case_summary_test"
+    assert payload["total_prompt_tokens"] == 2500
+    assert payload["total_completion_tokens"] == 500
+    assert payload["total_tokens"] == 3000
+    assert payload["total_cost_usd"] > 0
+    assert payload["chunks_processed_count"] == 2

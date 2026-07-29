@@ -139,7 +139,7 @@ async def test_hydrate_node_security_checks(monkeypatch):
     state = InvestigationState(doc_id="case_123")
     res = await hydrate_node(state, {})
     assert isinstance(res, Command)
-    assert res.goto == "coordinator"
+    assert res.goto == "policy_validation"
 
     # Test missing doc_id
     with pytest.raises(ValueError, match="doc_id partition context is required"):
@@ -156,7 +156,7 @@ async def test_hydrate_node_security_checks(monkeypatch):
     state_allowed = InvestigationState(doc_id="case_123")
     res_allowed = await hydrate_node(state_allowed, {})
     assert isinstance(res_allowed, Command)
-    assert res_allowed.goto == "coordinator"
+    assert res_allowed.goto == "policy_validation"
     
     # Unauthorized doc_id
     state_unauthorized = InvestigationState(doc_id="case_456")
@@ -166,11 +166,11 @@ async def test_hydrate_node_security_checks(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_hydrate_node_routing():
-    # Routed to coordinator if no HITL pending
+    # Routed to policy_validation if no HITL pending
     state_new = InvestigationState(doc_id="case_123")
     res = await hydrate_node(state_new, {})
     assert isinstance(res, Command)
-    assert res.goto == "coordinator"
+    assert res.goto == "policy_validation"
 
     # Routed to process_hitl if fact pending and user feedback is present
     state_hitl = InvestigationState(
@@ -244,7 +244,7 @@ async def test_process_hitl_node():
 
 
 @pytest.mark.asyncio
-async def test_state_bloat_pruning_and_sanitization():
+async def test_state_bloat_pruning_and_sanitization(monkeypatch):
     # Test Synthesis Node Sanitization
     state_synthesis = InvestigationState(
         doc_id="case_123",
@@ -256,7 +256,7 @@ async def test_state_bloat_pruning_and_sanitization():
     async def mock_call(sys_p, user_p, **kwargs):
         assert "ענה בעברית בלבד" in user_p
         return "merged summary"
-    nodes.call_llm = mock_call
+    monkeypatch.setattr(nodes, "call_llm", mock_call)
 
     res_synthesis = await synthesis_node(state_synthesis, {})
     assert res_synthesis["transient_synthesis_results"] == "merged summary"
@@ -289,7 +289,7 @@ async def test_state_bloat_pruning_and_sanitization():
 async def test_coordinator_node_command(monkeypatch, caplog):
     from src.query_agent import nodes
     from src.utils.config_manager import config_manager
-    caplog.set_level(logging.INFO)
+    caplog.set_level(logging.INFO, logger="src.utils.observability")
     
     async def mock_call(sys, user, **kw):
         if "coordinator_system" in sys or "Initial Question" in user:
@@ -315,9 +315,9 @@ async def test_coordinator_node_command(monkeypatch, caplog):
     assert "נבנתה" in res.update["messages"][-2].content
     assert "מתחילה" in res.update["messages"][-1].content
     obs_payloads = [
-        json.loads(record.message.split("[OBS] ", 1)[1])
+        json.loads(record.getMessage().split("[OBS] ", 1)[1])
         for record in caplog.records
-        if "[OBS] " in record.message
+        if "[OBS] " in record.getMessage()
     ]
     assert any(
         payload["event"] == "query.langgraph.route.selected" and payload["route"] == "parallel"
@@ -410,8 +410,8 @@ async def test_recursion_limit_fallback(monkeypatch):
         "messages": [{"role": "user", "content": "analyze"}]
     }
     
-    # Run with a recursion limit of 4 (which forces RemainingSteps <= 2 early)
-    res = await graph.ainvoke(state_dict, config={"recursion_limit": 4})
+    # Run with a recursion limit of 5 (which forces RemainingSteps <= 2 early with policy_validation)
+    res = await graph.ainvoke(state_dict, config={"recursion_limit": 5})
     assert "⚠️ הערה" in res["final_answer"]
 
 

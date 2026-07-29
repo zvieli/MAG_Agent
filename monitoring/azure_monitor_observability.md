@@ -109,16 +109,34 @@ traces
   by doc_id=tostring(obs.doc_id), bin(timestamp, 1h)
 ```
 
-## LLM Cost Controls
+## LLM Cost Controls & Token Trajectory
 
-Dashboard tile to confirm community-summary LLM calls are skipped by default.
+Dashboard tiles for token usage and estimated USD cost breakdown per step and model.
 
 ```kusto
 traces
 | where message startswith "[OBS] "
 | extend obs = parse_json(substring(message, 6))
-| where tostring(obs.event) == "metric" and tostring(obs.metric_name) == "community_summary_llm_skipped_count"
-| summarize skipped=sum(todouble(obs.metric_value)) by bin(timestamp, 1h)
+| where tostring(obs.event) startswith "trajectory."
+| summarize
+    total_prompt_tokens=sum(toint(obs.tokens_in)),
+    total_completion_tokens=sum(toint(obs.tokens_out)),
+    total_cost_usd=sum(todouble(obs.cost_usd))
+  by model_name=tostring(obs.model_name), step=tostring(obs.trajectory_step), bin(timestamp, 1h)
+```
+
+## Agent Trajectory Trace Tree
+
+Detailed step-by-step breakdown of an agent investigation trajectory.
+
+```kusto
+let target_trace_id = "request-REPLACE-ME";
+traces
+| where message startswith "[OBS] "
+| extend obs = parse_json(substring(message, 6))
+| where tostring(obs.trace_id) == target_trace_id or message has target_trace_id
+| project timestamp, step=tostring(obs.trajectory_step), node=tostring(obs.node), tool=tostring(obs.tool_name), status=tostring(obs.tool_status), cost=todouble(obs.cost_usd), duration_ms=todouble(obs.duration_ms), error=tostring(obs.error)
+| order by timestamp asc
 ```
 
 ## Trace Lookup
@@ -131,3 +149,4 @@ traces
 | where message has target_trace_id
 | order by timestamp asc
 ```
+

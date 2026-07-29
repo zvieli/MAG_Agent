@@ -154,3 +154,22 @@ class RagEvaluator:
             return 0.5, content
         except Exception:
             return 0.5, "Failed to parse LLM judgment"
+
+
+async def evaluate_trajectory_step(
+    step_name: str,
+    input_text: str,
+    output_text: str,
+) -> float:
+    """Asynchronous lightweight trace-level step evaluation score (0.0 to 1.0)."""
+    if not output_text or not output_text.strip():
+        return 0.0
+    if "ERROR" in output_text.upper() or "FAILED" in output_text.upper():
+        return 0.0
+    # Heuristic scoring based on task success indicators
+    if step_name == "policy_validation":
+        return 1.0 if "PASSED" in output_text.upper() or not output_text else 0.0
+    if len(output_text.strip()) > 10:
+        return 0.9
+    return 0.5
+
