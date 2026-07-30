@@ -107,15 +107,50 @@ def test_edge_sanitizer_compacts_relation_history_and_source_files():
     assert clean["confidence"] == "EXTRACTED"
     assert clean["confidence_score"] == 0.95
     assert clean["timestamp"] == "2026-01-05"
-    assert clean["weight"] == 2.0
+    assert "weight" not in clean  # Excluded in favor of confidence_score
     assert clean["relation_history_count"] == 2
-    assert "RELATED_TO" in clean["relation_history_preview"]
     assert "direct evidence" in clean["relation_history_preview"]
+    assert "PART_OF" in clean["relation_history_preview"]  # Kept because it differed from RELATED_TO
     assert clean["source_files_count"] == 2
     assert "case-1" in clean["source_files_preview"]
     assert clean["meta_is_inferred"] is False
     assert "all_relations_history" not in clean
     assert "source_files" not in clean
+
+
+def test_edge_sanitizer_omits_single_file_previews_and_dummy_timestamps():
+    manager = _manager()
+    edge = {
+        "source": "x",
+        "target": "y",
+        "relation": "INVOLVED_IN",
+        "confidence_score": 1.0,
+        "weight": 1.0,
+        "timestamp": "1900-01-01",
+        "pk": "case-100",
+        "metadata": {
+            "all_relations_history": [
+                {
+                    "relation": "INVOLVED_IN",
+                    "quality": 1.0,
+                    "timestamp": "1900-01-01",
+                    "source_file": "case-100",
+                    "description": "sample description",
+                }
+            ],
+            "source_files": ["case-100"],
+        },
+    }
+
+    clean = manager._sanitize_for_cosmos(edge, is_node=False)
+
+    assert "weight" not in clean
+    assert "timestamp" not in clean
+    assert "source_files_count" not in clean
+    assert "source_files_preview" not in clean
+    assert clean["relation_history_count"] == 1
+    assert "INVOLVED_IN" not in clean.get("relation_history_preview", "")
+    assert "sample description" in clean["relation_history_preview"]
 
 
 @pytest.mark.asyncio

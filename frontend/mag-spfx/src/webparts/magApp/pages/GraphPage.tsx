@@ -371,13 +371,19 @@ export const GraphPage: React.FC<GraphPageProps> = ({ docId, graphService }) => 
                           {histories.map((hist: any, idx: number) => (
                             <div key={idx} style={{ fontSize: '12px', color: '#334155', borderBottom: idx < histories.length - 1 ? '1px dashed #e2e8f0' : 'none', paddingBottom: idx < histories.length - 1 ? '6px' : '0' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
-                                <span>סוג קשר: {relationLabel(hist.relation)}</span>
-                                {hist.quality !== undefined && <span style={{ color: '#0f766e' }}>איכות: {hist.quality}</span>}
+                                <span>סוג קשר: {relationLabel(hist.relation || selectedEdge.relation)}</span>
+                                {(hist.quality !== undefined || selectedEdge.confidence !== undefined) && (
+                                  <span style={{ color: '#0f766e' }}>איכות: {hist.quality ?? selectedEdge.confidence}</span>
+                                )}
                               </div>
                               {hist.description && <p style={{ margin: '4px 0', fontStyle: 'italic', fontSize: '11px', color: '#475569' }}>{hist.description}</p>}
                               <div style={{ fontSize: '10px', color: '#64748b', display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '4px' }}>
-                                <span style={{ direction: 'ltr', textAlign: 'left', wordBreak: 'break-all' }}>קובץ: {hist.source_file || 'לא ידוע'}</span>
-                                {hist.source_location && <span>מיקום: {hist.source_location}</span>}
+                                <span style={{ direction: 'ltr', textAlign: 'left', wordBreak: 'break-all' }}>
+                                  קובץ: {hist.source_file || (selectedEdge.properties?.pk as string) || (selectedEdge.properties?.source_file as string) || 'לא ידוע'}
+                                </span>
+                                {(hist.source_location || selectedEdge.properties?.source_location) && (
+                                  <span>מיקום: {hist.source_location || selectedEdge.properties?.source_location}</span>
+                                )}
                               </div>
                             </div>
                           ))}

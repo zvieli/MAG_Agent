@@ -139,18 +139,13 @@ class QueryAgent:
             cid = chunk["id"]
             score = chunk["score"]
             text = chunk["text"]
-            parts = cid.split("_")
-            if len(parts) >= 2:
-                source_file = parts[0]
-                try:
-                    frag_id = f"Chunk {int(parts[1])}"
-                except ValueError:
-                    frag_id = parts[1]
-                source_str = f"Source: {source_file}, Fragment: {frag_id}"
+            parts = [p for p in cid.replace("CHUNK", "").replace("chunk", "").split("_") if p.strip()]
+            if parts and parts[-1].isdigit():
+                page_label = f"Page {parts[-1]}"
             else:
-                source_str = f"Source: {cid}"
+                page_label = cid
             formatted_results.append(
-                f"CHUNK {cid} ({source_str}) (Score: {score:.3f})\nTEXT: {text[:1200]}..."
+                f"[{page_label}] (Score: {score:.3f})\nTEXT: {text[:1200]}..."
             )
         return "\n\n".join(formatted_results)
 
@@ -163,11 +158,8 @@ class QueryAgent:
             chunk_descriptions.append(f"[{i}] Content: {text_preview}")
         chunks_text = "\n\n".join(chunk_descriptions)
         
-        system_prompt = (
-            "You are a legal document reranking assistant. Evaluate the list of chunks "
-            "and return a JSON list of indices of the top most relevant chunks for the query. "
-            "Format: [2, 0, 4]."
-        )
+        from src.utils.config_manager import config_manager
+        system_prompt = await config_manager.get_config("rerank_chunks_system.md")
         user_prompt = f"Query: {query}\n\nChunks:\n{chunks_text}\n\nTop indices:"
         try:
             model = settings.graphify_agent_model or "gpt-4o"
@@ -265,12 +257,12 @@ class QueryAgent:
 
     # --- Execution Loop ---
 
-    async def answer_question(self, question: str) -> str:
+    async def answer_question(self, question: str, autonomous_mode: bool = False) -> str:
         """
         Executes the LangGraph state machine.
         For automated non-interactive testing, automatically approves all proposed facts.
         """
-        state = InvestigationState(doc_id=self.doc_id)
+        state = InvestigationState(doc_id=self.doc_id, autonomous_mode=autonomous_mode)
         state.messages.append(UserMessage(content=question))
         
         graph = get_investigative_graph()
@@ -297,6 +289,7 @@ class QueryAgent:
         question: str,
         state_dict: Optional[Dict[str, Any]] = None,
         trace_id: Optional[str] = None,
+        autonomous_mode: bool = False,
     ) -> Dict[str, Any]:
         """
         Runs a single turn of the LangGraph state machine.
@@ -307,8 +300,10 @@ class QueryAgent:
         
         if state_dict:
             state = from_external_query_state(state_dict)
+            if autonomous_mode:
+                state.autonomous_mode = True
         else:
-            state = InvestigationState(doc_id=self.doc_id)
+            state = InvestigationState(doc_id=self.doc_id, autonomous_mode=autonomous_mode)
             state.messages.append(UserMessage(content=question))
             
         current_state_dict = state.model_dump()

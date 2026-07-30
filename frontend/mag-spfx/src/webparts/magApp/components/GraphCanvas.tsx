@@ -230,14 +230,23 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graph, onSelectNode, o
     cyRef.current = cy;
 
     return () => {
-      cy.destroy();
+      try {
+        if (cy && typeof cy.stop === 'function') {
+          cy.stop();
+        }
+        if (cy && typeof cy.destroy === 'function' && !cy.destroyed()) {
+          cy.destroy();
+        }
+      } catch (e) {
+        // Guard against unmount race condition
+      }
       cyRef.current = null;
     };
   }, [graph, onSelectEdge, onSelectNode]);
 
   React.useEffect(() => {
     const cy = cyRef.current;
-    if (!cy || !command) return;
+    if (!cy || cy.destroyed() || !command) return;
 
     if (command.type === 'fit') {
       cy.fit(undefined, 32);

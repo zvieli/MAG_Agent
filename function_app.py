@@ -1538,6 +1538,7 @@ async def start_query_async(req: func.HttpRequest, client: df.DurableOrchestrati
     question = req_body.get("question") or ""
     doc_id = req_body.get("doc_id")
     state = req_body.get("state")
+    autonomous_mode = req_body.get("autonomous_mode", True)
 
     if not question and not state:
         return _cors_response("Missing required field: question", status_code=400)
@@ -1551,6 +1552,7 @@ async def start_query_async(req: func.HttpRequest, client: df.DurableOrchestrati
             "doc_id": doc_id,
             "state": state,
             "trace_id": trace_id,
+            "autonomous_mode": autonomous_mode,
         }
     )
     elapsed_ms = int((time.perf_counter() - started_at) * 1000)
@@ -1641,12 +1643,13 @@ async def activity_query_investigation(queryInput: dict) -> dict:
     doc_id = queryInput["doc_id"]
     state_dict = queryInput.get("state")
     trace_id = queryInput.get("trace_id")
+    autonomous_mode = queryInput.get("autonomous_mode", True)
     started_at = time.perf_counter()
     
     logging.info(f"[ACTIVITY][QUERY][START] doc_id: {doc_id} | question: {question[:50]}...")
     try:
         async with QueryAgent(doc_id=doc_id, stateless=True) as agent:
-            result_state = await agent.answer_question_stateless(question, state_dict, trace_id=trace_id)
+            result_state = await agent.answer_question_stateless(question, state_dict, trace_id=trace_id, autonomous_mode=autonomous_mode)
             elapsed_ms = int((time.perf_counter() - started_at) * 1000)
             answer = result_state.get("final_answer")
             log_event(

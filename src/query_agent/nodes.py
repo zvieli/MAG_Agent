@@ -72,11 +72,29 @@ def trim_messages(messages: List[ChatMessage], max_history: int = 10) -> List[Ch
     other_msgs = [m for m in messages if not ((isinstance(m, dict) and m.get("role") == "system") or getattr(m, "role", "") == "system")]
     return system_msgs + other_msgs[-max_history:]
 
+def _format_compact_source(source_id: str) -> str:
+    """Format raw source IDs / chunk keys into clean page-based citations."""
+    if not source_id:
+        return "Unknown"
+    sid = str(source_id).strip()
+    if sid in ("synthesis_fallback", "doc_search", "graph_query"):
+        return sid
+    if sid.startswith("Page ") or sid.startswith("Pages ") or sid.startswith("עמוד "):
+        return sid
+
+    parts = [p for p in sid.replace("CHUNK", "").replace("chunk", "").split("_") if p.strip()]
+    if parts:
+        last_part = parts[-1]
+        if last_part.isdigit():
+            return f"Page {last_part}"
+    return sid
+
+
 # Core LLM call helper with token trajectory tracking
 async def call_llm(
     system_prompt: str,
     user_prompt: str,
-    max_tokens: int = 1000,
+    max_tokens: int = 4096,
     temperature: float = 0.0,
     step_name: str = "llm_invocation",
 ) -> str:
@@ -489,12 +507,31 @@ async def graph_branch_node(state: InvestigationState, config: RunnableConfig) -
         ctx = await kp.get_entity_context(resolved_a)
         events = []
         for rel in ctx.get("relationships", []):
-            ts = rel.get("metadata", {}).get("meta_timestamp") or rel.get("metadata", {}).get("timestamp")
-            if ts:
-                events.append(f"{ts}: {rel['relation']} with {rel['target_label']}")
+            meta = rel.get("metadata", {}) if isinstance(rel.get("metadata"), dict) else {}
+            ts = meta.get("meta_timestamp") or meta.get("timestamp")
+            
+            # Extract description from relation_history_preview if available
+            desc = ""
+            rel_hist = meta.get("relation_history_preview")
+            if rel_hist and isinstance(rel_hist, str):
+                try:
+                    hist_list = json.loads(rel_hist)
+                    if hist_list and isinstance(hist_list, list) and hist_list[0].get("description"):
+                        desc = hist_list[0]["description"]
+                except Exception:
+                    pass
+            
+            ts_prefix = f"[{ts}] " if ts else ""
+            desc_suffix = f" ({desc})" if desc else ""
+            events.append(f"{ts_prefix}{rel.get('relation', 'RELATED_TO')} -> {rel.get('target_label', 'Unknown')}{desc_suffix}")
+            
         events.sort()
-        results.append(f"Timeline for {entity_a}:\n" + "\n".join(events))
-        result_count = len(events)
+        if events:
+            results.append(f"Graph Relationships & Timeline for {entity_a}:\n" + "\n".join(events))
+            result_count = len(events)
+        else:
+            results.append(f"No relationships found for entity: {entity_a}")
+            result_count = 0
     else:
         # Default: check ontology rules in Cosmos DB using pushdown
         engine = OntologyEngine(SCHEMA_CONFIG.model_dump())
@@ -518,6 +555,24 @@ async def graph_branch_node(state: InvestigationState, config: RunnableConfig) -
     }
 
 
+async def check_fact_conflict_llm(new_fact: str, verified_facts: List[VerifiedFact]) -> bool:
+    if not verified_facts:
+        return False
+    facts_text = "\n".join([f"- {vf.fact}" for vf in verified_facts[-10:]])
+    from src.utils.config_manager import config_manager
+    system_prompt = await config_manager.get_config("fact_consistency_auditor_system.md")
+    user_prompt = f"Existing Verified Facts:\n{facts_text}\n\nNew Fact:\n{new_fact}"
+    try:
+        res_str = await call_llm(system_prompt, user_prompt)
+        if res_str.startswith("```"):
+            res_str = res_str.replace("```json", "").replace("```", "").strip()
+        data = json.loads(res_str)
+        return bool(data.get("conflict", False))
+    except Exception as e:
+        logger.warning(f"Conflict check failed: {e}")
+        return False
+
+
 # Node 6: Synthesis Node
 async def synthesis_node(state: InvestigationState, config: RunnableConfig) -> Dict[str, Any]:
     node_name = "synthesis"
@@ -530,10 +585,37 @@ async def synthesis_node(state: InvestigationState, config: RunnableConfig) -> D
     doc_res = state.transient_doc_results or "No vector search results."
     graph_res = state.transient_graph_results or "No graph search results."
     tool_path = []
+    
+    doc_has_content = bool(
+        state.transient_doc_results
+        and len(state.transient_doc_results.strip()) > 20
+        and "No matches found" not in state.transient_doc_results
+        and "No vector search results" not in state.transient_doc_results
+    )
+    graph_has_content = bool(
+        state.transient_graph_results
+        and len(state.transient_graph_results.strip()) > 20
+        and "No graph search results" not in state.transient_graph_results
+        and "No relationships found" not in state.transient_graph_results
+        and "No nodes found" not in state.transient_graph_results
+    )
+    
     if state.transient_doc_results:
         tool_path.append("doc_search")
     if state.transient_graph_results:
         tool_path.append("graph_query")
+        
+    doc_score = 0.85 if doc_has_content else 0.30
+    graph_score = 0.90 if graph_has_content else 0.30
+    
+    if doc_has_content and graph_has_content:
+        grounding_score = max(doc_score, graph_score)
+    elif doc_has_content:
+        grounding_score = doc_score
+    elif graph_has_content:
+        grounding_score = graph_score
+    else:
+        grounding_score = 0.30
     
     from src.utils.config_manager import config_manager
     base_system_prompt = await config_manager.get_config("synthesis_system.md")
@@ -544,7 +626,7 @@ async def synthesis_node(state: InvestigationState, config: RunnableConfig) -> D
         f"Vector Results:\n{doc_res}\n\nGraph Results:\n{graph_res}"
     )
     
-    synthesis = await call_llm(system_prompt, user_prompt)
+    synthesis = await call_llm(system_prompt, user_prompt, max_tokens=4096, step_name="synthesis")
     elapsed_ms = int((time.perf_counter() - started_at) * 1000)
     log_event(
         "query.langgraph.synthesis.completed",
@@ -559,6 +641,7 @@ async def synthesis_node(state: InvestigationState, config: RunnableConfig) -> D
         "transient_synthesis_results": synthesis,
         "transient_doc_results": None,
         "transient_graph_results": None,
+        "transient_grounding_score": grounding_score,
         "last_tool_path": tool_path,
     }
 
@@ -587,51 +670,145 @@ async def extraction_node(state: InvestigationState, config: RunnableConfig) -> 
     system_prompt = await config_manager.get_config("fact_extraction_system.md")
     user_prompt = f"ענה בעברית בלבד. Evidence:\n{synthesis}"
     
-    pending = None
+    extracted_pendings: List[PendingFactApproval] = []
+    HIGH_GROUNDING_THRESHOLD = 0.70
+    GRAY_AREA_THRESHOLD = 0.50
+
     try:
-        res_str = await call_llm(system_prompt, user_prompt)
+        res_str = await call_llm(system_prompt, user_prompt, max_tokens=4096, step_name="extraction")
         if res_str.startswith("```"):
             res_str = res_str.replace("```json", "").replace("```", "").strip()
         data = json.loads(res_str)
-        if data.get("fact_found") and data.get("fact") and data.get("source_id"):
-            # Construct Audit Trace with full provenance details
+        
+        # Support both 'facts' (list) and 'fact' (single item fallback)
+        raw_facts = data.get("facts") if isinstance(data.get("facts"), list) else []
+        if not raw_facts and data.get("fact_found") and data.get("fact"):
+            raw_facts = [{
+                "fact": data["fact"],
+                "source_id": data.get("source_id", "source_chunk"),
+                "grounding_score": data.get("grounding_score")
+            }]
+            
+        for item in raw_facts:
+            fact_text = item.get("fact") if isinstance(item, dict) else str(item)
+            quote_text = item.get("quote") if isinstance(item, dict) else None
+            source_id = item.get("source_id", "source_chunk") if isinstance(item, dict) else "source_chunk"
+            item_score = item.get("grounding_score") if isinstance(item, dict) else None
+            
+            if not fact_text:
+                continue
+
+            grounding_score = float(item_score or state.transient_grounding_score or 0.85)
+            if quote_text and len(quote_text.strip()) > 10 and quote_text.strip() in synthesis:
+                grounding_score = max(grounding_score, 0.85)
+            source_type = "graph_query" if "graph_query" in (state.last_tool_path or []) else "doc_search"
+            
+            if grounding_score >= HIGH_GROUNDING_THRESHOLD:
+                conflict_detected = False
+            elif GRAY_AREA_THRESHOLD <= grounding_score < HIGH_GROUNDING_THRESHOLD:
+                conflict_detected = await check_fact_conflict_llm(fact_text, state.verified_facts)
+            else:
+                conflict_detected = True
+                
             audit_trace = {
                 "investigative_task": state.current_task,
                 "synthesized_evidence_context": synthesis[:800],
                 "tool_path": state.last_tool_path or ["search"],
                 "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
             }
-            pending = PendingFactApproval(
-                fact=data["fact"],
-                source_id=data["source_id"],
-                doc_id=state.doc_id,
-                audit_trace=audit_trace
+            
+            extracted_pendings.append(
+                PendingFactApproval(
+                    fact=fact_text,
+                    source_id=source_id,
+                    doc_id=state.doc_id,
+                    grounding_score=grounding_score,
+                    source_type=source_type,
+                    conflict_detected=conflict_detected,
+                    quote=quote_text,
+                    audit_trace=audit_trace
+                )
             )
     except Exception as e:
         logger.warning(f"Fact extraction failed: {e}")
+
+    # Resilient Synthesis Fallback: Ensure evidence is NEVER dropped if synthesis exists
+    if not extracted_pendings and len(synthesis.strip()) > 30 and "No vector search" not in synthesis and "No graph search" not in synthesis:
+        logger.warning("[extraction_node] LLM returned 0 facts for non-empty synthesis. Invoking resilient synthesis fallback.")
+        fallback_lines = [line.strip("- *#").strip() for line in synthesis.split("\n") if len(line.strip("- *#").strip()) > 15]
+        for idx, line in enumerate(fallback_lines[:5], 1):
+            audit_trace = {
+                "investigative_task": state.current_task,
+                "synthesized_evidence_context": synthesis[:800],
+                "tool_path": state.last_tool_path or ["search"],
+                "timestamp": datetime.now(UTC).isoformat().replace("+00:00", "Z"),
+            }
+            extracted_pendings.append(
+                PendingFactApproval(
+                    fact=line,
+                    source_id="synthesis_fallback",
+                    doc_id=state.doc_id,
+                    grounding_score=float(state.transient_grounding_score or 0.85),
+                    source_type="doc_search",
+                    conflict_detected=False,
+                    quote=line,
+                    audit_trace=audit_trace
+                )
+            )
 
     # Sanitization: Prune transient_synthesis_results
     updates: Dict[str, Any] = {
         "transient_synthesis_results": None
     }
     
-    if pending:
-        updates["pending_fact_approval"] = pending
+    verified_facts = list(state.verified_facts)
+    first_hitl_pending = None
+    
+    for pending in extracted_pendings:
+        requires_hitl = (pending.grounding_score < HIGH_GROUNDING_THRESHOLD or pending.conflict_detected) and not state.autonomous_mode
+        
+        if requires_hitl:
+            if first_hitl_pending is None:
+                first_hitl_pending = pending
+        else:
+            # Auto-approve high-grounding / autonomous facts directly into verified_facts ledger
+            new_fact = VerifiedFact(
+                fact=pending.fact,
+                source_id=pending.source_id,
+                doc_id=pending.doc_id,
+                confidence=pending.grounding_score,
+                quote=pending.quote,
+                audit_trace=pending.audit_trace
+            )
+            verified_facts.append(new_fact)
+            
+            if state.autonomous_mode and (pending.grounding_score < HIGH_GROUNDING_THRESHOLD or pending.conflict_detected):
+                updates["errors"] = list(updates.get("errors", state.errors)) + [
+                    f"Autonomous Warning: Fact '{pending.fact[:50]}...' auto-admitted with grounding {pending.grounding_score:.2f}."
+                ]
+    
+    updates["verified_facts"] = verified_facts
+    
+    if first_hitl_pending:
+        updates["pending_fact_approval"] = first_hitl_pending
         goto = "halt_for_hitl"
         log_event(
             "query.langgraph.hitl.pending",
             **_obs_fields(state, config, node_name),
-            source_id=pending.source_id,
+            source_id=first_hitl_pending.source_id,
             tool_path=state.last_tool_path,
+            grounding_score=first_hitl_pending.grounding_score,
+            conflict_detected=first_hitl_pending.conflict_detected,
         )
     else:
-        # Mark current task complete since no new fact was found
+        updates["pending_fact_approval"] = None
         updates["current_task"] = None
         goto = "planner"
         log_event(
             "query.langgraph.extraction.completed",
             **_obs_fields(state, config, node_name),
-            fact_found=False,
+            fact_count=len(extracted_pendings),
+            verified_added=len(verified_facts) - len(state.verified_facts),
             route=goto,
         )
         
@@ -682,20 +859,24 @@ async def finalizer_node(state: InvestigationState, config: RunnableConfig) -> D
     
     ledger_content = []
     for idx, fact in enumerate(state.verified_facts, 1):
-        ledger_content.append(f"Fact #{idx}: {fact.fact} [Source: {fact.source_id}]")
+        compact_src = _format_compact_source(fact.source_id)
+        line = f"Fact #{idx}: {fact.fact} [Source: {compact_src}]"
+        if fact.quote:
+            line += f"\n   Verbatim Quote/Evidence: \"{fact.quote}\""
+        ledger_content.append(line)
         
-    ledger_text = "\n".join(ledger_content) if ledger_content else "No verified facts in ledger."
+    ledger_text = "\n\n".join(ledger_content) if ledger_content else "No verified facts in ledger."
     original_question = _initial_user_question(list(state.messages))
     
     from src.utils.config_manager import config_manager
     system_prompt = await config_manager.get_config("finalizer_system.md")
     user_prompt = (
-        "ענה בעברית בלבד לשאלת המשתמש המקורית, ורק על בסיס לדג'ר העובדות המאומתות.\n\n"
+        "ענה בעברית בלבד לשאלת המשתמש המקורית, בצורה מפורטת ומקיפה, על בסיס עובדות הלדג'ר המאומתות והציטוטים המדויקים.\n\n"
         f"Original Question:\n{original_question}\n\n"
         f"Verified Facts Ledger:\n{ledger_text}"
     )
     
-    final_answer = await call_llm(system_prompt, user_prompt)
+    final_answer = await call_llm(system_prompt, user_prompt, max_tokens=4096, step_name="finalizer")
     
     # Append best-effort notice if execution was forced to finalize due to step exhaustion
     if state.remaining_steps is not None and state.remaining_steps <= 2:

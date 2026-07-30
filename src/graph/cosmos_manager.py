@@ -155,7 +155,15 @@ class CosmosGremlinManager:
             "pk",
             "source_file",
             "partitionKey",
+            "weight",  # Redundant: handled in favor of confidence_score
         ]
+
+        pk_val = (
+            data.get("pk")
+            or data.get("partitionKey")
+            or data.get("source_file")
+            or data.get("metadata", {}).get("source_file")
+        )
 
         for k, v in data.items():
             # 1. Compact heavy investigative fields instead of storing raw nested data.
@@ -169,11 +177,11 @@ class CosmosGremlinManager:
                 continue
 
             if k == "all_relations_history":
-                self._add_relation_history(clean_data, v)
+                self._add_relation_history(clean_data, v, parent_data=data)
                 continue
 
             if k == "source_files":
-                self._add_source_files(clean_data, v)
+                self._add_source_files(clean_data, v, pk_value=pk_val)
                 continue
 
             if k in heavy_fields:
@@ -196,17 +204,21 @@ class CosmosGremlinManager:
                     elif mk == "resolved_aliases_data":
                         self._add_alias_provenance(clean_data, mv)
                     elif mk == "all_relations_history":
-                        self._add_relation_history(clean_data, mv)
+                        self._add_relation_history(clean_data, mv, parent_data=data)
                     elif mk == "source_files":
-                        self._add_source_files(clean_data, mv)
+                        self._add_source_files(clean_data, mv, pk_value=pk_val)
                     elif mk not in heavy_fields and isinstance(
                         mv, (str, int, float, bool)
                     ):
+                        if mk == "timestamp" and str(mv).startswith("1900-01-01"):
+                            continue
                         clean_data[f"meta_{mk}"] = mv
                 continue
 
             # 4. Only keep primitive types for properties
             if isinstance(v, (str, int, float, bool)):
+                if k == "timestamp" and str(v).startswith("1900-01-01"):
+                    continue
                 clean_data[k] = self._truncate_text(v) if isinstance(v, str) else v
 
         # Unify fallback description into meta_forensic_summary if needed
@@ -252,37 +264,74 @@ class CosmosGremlinManager:
         )
 
     @classmethod
-    def _add_relation_history(cls, clean_data: Dict[str, Any], value: Any) -> None:
+    def _add_relation_history(
+        cls, clean_data: Dict[str, Any], value: Any, parent_data: Optional[Dict[str, Any]] = None
+    ) -> None:
         if not isinstance(value, list) or not value:
             return
         clean_data["relation_history_count"] = len(value)
-        clean_data["relation_history_preview"] = cls._json_preview(
-            [
-                {
-                    "relation": item.get("relation"),
-                    "quality": item.get("quality"),
-                    "timestamp": item.get("timestamp"),
-                    "source_file": item.get("source_file"),
-                    "source_location": item.get("source_location"),
-                    "description": cls._truncate_text(
-                        str(item.get("description") or ""), 240
-                    )
-                    if item.get("description")
-                    else None,
-                }
-                for item in value
-                if isinstance(item, dict)
-            ]
-        )
+        
+        parent_rel = (parent_data or {}).get("relation")
+        parent_score = (parent_data or {}).get("confidence_score") or (parent_data or {}).get("weight")
+        parent_file = (parent_data or {}).get("pk") or (parent_data or {}).get("source_file")
+        parent_loc = (parent_data or {}).get("source_location")
+        parent_time = (parent_data or {}).get("timestamp")
+
+        compact_history = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            entry: Dict[str, Any] = {}
+            
+            # Keep unique relation only if different from parent edge
+            rel = item.get("relation")
+            if rel and rel != parent_rel:
+                entry["relation"] = rel
+                
+            # Keep unique quality only if different from parent confidence score
+            quality = item.get("quality")
+            if quality is not None and quality != parent_score:
+                entry["quality"] = quality
+
+            # Keep unique timestamp only if non-dummy and different from parent
+            time_val = item.get("timestamp")
+            if time_val and not str(time_val).startswith("1900-01-01") and time_val != parent_time:
+                entry["timestamp"] = time_val
+
+            # Keep unique source file only if different from parent pk/file
+            src_file = item.get("source_file")
+            if src_file and src_file != parent_file:
+                entry["source_file"] = src_file
+
+            # Keep unique source location only if different from parent location
+            src_loc = item.get("source_location")
+            if src_loc and src_loc != parent_loc:
+                entry["source_location"] = src_loc
+
+            # Always keep description if present
+            desc = item.get("description")
+            if desc and str(desc).strip():
+                entry["description"] = cls._truncate_text(str(desc), 240)
+
+            if entry:
+                compact_history.append(entry)
+
+        if compact_history:
+            clean_data["relation_history_preview"] = cls._json_preview(compact_history)
 
     @classmethod
-    def _add_source_files(cls, clean_data: Dict[str, Any], value: Any) -> None:
+    def _add_source_files(
+        cls, clean_data: Dict[str, Any], value: Any, pk_value: Optional[str] = None
+    ) -> None:
         if not isinstance(value, list) or not value:
             return
-        clean_data["source_files_count"] = len(value)
-        clean_data["source_files_preview"] = cls._json_preview(
-            [str(item) for item in value[:MAX_COMPACT_PREVIEW_ITEMS]]
-        )
+        
+        # Only include count and preview if there's more than 1 source file
+        if len(value) > 1:
+            clean_data["source_files_count"] = len(value)
+            clean_data["source_files_preview"] = cls._json_preview(
+                [str(item) for item in value[:MAX_COMPACT_PREVIEW_ITEMS]]
+            )
 
     async def upsert_node(self, node: Dict[str, Any]):
         """

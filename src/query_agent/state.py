@@ -35,6 +35,7 @@ class VerifiedFact(BaseModel):
     source_id: str
     doc_id: str
     confidence: float
+    quote: Optional[str] = None
     audit_trace: Dict[str, Any] = Field(
         default_factory=dict,
         description="Records tool name, arguments, and LLM reasoning trace leading to this fact"
@@ -44,6 +45,10 @@ class PendingFactApproval(BaseModel):
     fact: str
     source_id: str
     doc_id: str
+    grounding_score: float = 1.0
+    source_type: Literal["doc_search", "graph_query", "synthesis"] = "doc_search"
+    conflict_detected: bool = False
+    quote: Optional[str] = None
     audit_trace: Dict[str, Any]
 
 class InvestigationBaseState(BaseModel):
@@ -60,6 +65,7 @@ class InvestigationBaseState(BaseModel):
     messages: List[ChatMessage] = Field(default_factory=list, description="Conversation messages and thoughts")
     errors: List[str] = Field(default_factory=list, description="Warning/error traces")
     retry_count: int = 0
+    autonomous_mode: bool = Field(default=True, description="When True, runs without HITL halts")
 
 class InvestigationInputState(InvestigationBaseState):
     pending_fact_approval: Optional[PendingFactApproval] = None
@@ -79,6 +85,7 @@ class InvestigationState(InvestigationBaseState):
     transient_doc_results: Optional[str] = None
     transient_graph_results: Optional[str] = None
     transient_synthesis_results: Optional[str] = None
+    transient_grounding_score: float = 1.0
     last_tool_path: List[str] = Field(default_factory=list)
     
     # Managed Value for recursion tracking

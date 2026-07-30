@@ -352,9 +352,9 @@ async def test_extraction_node_command(monkeypatch):
     assert res.update["current_task"] is None
     assert res.update["transient_synthesis_results"] is None
     
-    # Scenario 2: Fact found
+    # Scenario 2: Fact found with low grounding score (should halt for HITL)
     async def mock_call_fact(sys, user, **kw):
-        return '{"fact_found": true, "fact": "John Doe is a suspect", "source_id": "doc_1"}'
+        return '{"fact_found": true, "fact": "John Doe is a suspect", "source_id": "doc_1", "grounding_score": 0.30}'
     async def mock_config(name):
         return "system_prompt_mock"
         
@@ -366,6 +366,7 @@ async def test_extraction_node_command(monkeypatch):
         current_task="investigate suspects",
         transient_synthesis_results="John Doe is a suspect based on docs.",
         last_tool_path=["doc_search", "graph_query"],
+        autonomous_mode=False,
     )
     res_fact = await extraction_node(state_fact, {})
     assert isinstance(res_fact, Command)
@@ -440,3 +441,337 @@ def test_message_trimming():
     assert getattr(trimmed[2], "content", None) == "a2"
     assert getattr(trimmed[3], "content", None) == "u3"
     assert getattr(trimmed[4], "content", None) == "a3"
+
+
+@pytest.mark.asyncio
+async def test_extraction_high_grounding_auto_approval(monkeypatch):
+    from src.query_agent import nodes
+    
+    async def mock_call_llm(sys, user, **kw):
+        return '{"fact_found": true, "fact": "high confidence fact", "source_id": "chunk_01", "grounding_score": 0.85}'
+        
+    monkeypatch.setattr(nodes, "call_llm", mock_call_llm)
+    
+    state = InvestigationState(
+        doc_id="case_123",
+        current_task="task1",
+        transient_synthesis_results="High quality evidence context.",
+        transient_grounding_score=0.85
+    )
+    
+    cmd = await extraction_node(state, {})
+    assert isinstance(cmd, Command)
+    assert cmd.goto == "planner"
+    assert len(cmd.update["verified_facts"]) == 1
+    assert cmd.update["verified_facts"][0].fact == "high confidence fact"
+    assert cmd.update["pending_fact_approval"] is None
+
+
+@pytest.mark.asyncio
+async def test_extraction_low_grounding_hitl_halt(monkeypatch):
+    from src.query_agent import nodes
+    
+    async def mock_call_llm(sys, user, **kw):
+        return '{"fact_found": true, "fact": "unanchored fact", "source_id": "chunk_02", "grounding_score": 0.30}'
+        
+    monkeypatch.setattr(nodes, "call_llm", mock_call_llm)
+    
+    state = InvestigationState(
+        doc_id="case_123",
+        current_task="task1",
+        transient_synthesis_results="Weak evidence context.",
+        transient_grounding_score=0.30,
+        autonomous_mode=False
+    )
+    
+    cmd = await extraction_node(state, {})
+    assert isinstance(cmd, Command)
+    assert cmd.goto == "halt_for_hitl"
+    assert cmd.update["pending_fact_approval"].fact == "unanchored fact"
+    assert cmd.update["pending_fact_approval"].grounding_score == 0.30
+
+
+@pytest.mark.asyncio
+async def test_extraction_gated_conflict_detection_gray_area(monkeypatch):
+    from src.query_agent import nodes
+    
+    calls = []
+    async def mock_call_llm(sys, user, **kw):
+        calls.append(sys)
+        if "consistency auditor" in sys:
+            return '{"conflict": true}'
+        return '{"fact_found": true, "fact": "conflicting fact", "source_id": "chunk_03", "grounding_score": 0.60}'
+        
+    monkeypatch.setattr(nodes, "call_llm", mock_call_llm)
+    
+    state = InvestigationState(
+        doc_id="case_123",
+        current_task="task1",
+        transient_synthesis_results="Gray area evidence context.",
+        transient_grounding_score=0.60,
+        verified_facts=[VerifiedFact(fact="existing fact", source_id="src1", doc_id="case_123", confidence=1.0)],
+        autonomous_mode=False
+    )
+    
+    cmd = await extraction_node(state, {})
+    assert isinstance(cmd, Command)
+    # Conflict detected in gray area forces HITL halt
+    assert cmd.goto == "halt_for_hitl"
+    assert cmd.update["pending_fact_approval"].conflict_detected is True
+    # Verify conflict checker LLM was called
+    assert any("consistency auditor" in sys for sys in calls)
+
+
+@pytest.mark.asyncio
+async def test_extraction_autonomous_mode_bypass(monkeypatch):
+    from src.query_agent import nodes
+    
+    async def mock_call_llm(sys, user, **kw):
+        return '{"fact_found": true, "fact": "autonomous fact", "source_id": "chunk_04", "grounding_score": 0.40}'
+        
+    monkeypatch.setattr(nodes, "call_llm", mock_call_llm)
+    
+    state = InvestigationState(
+        doc_id="case_123",
+        current_task="task1",
+        transient_synthesis_results="Low grounding context.",
+        transient_grounding_score=0.40,
+        autonomous_mode=True
+    )
+    
+    cmd = await extraction_node(state, {})
+    assert isinstance(cmd, Command)
+    assert cmd.goto == "planner"
+    assert len(cmd.update["verified_facts"]) == 1
+    assert cmd.update["verified_facts"][0].fact == "autonomous fact"
+    assert any("Autonomous Warning" in err for err in cmd.update.get("errors", []))
+
+
+@pytest.mark.asyncio
+async def test_multi_fact_extraction_node(monkeypatch):
+    from src.query_agent import nodes
+    
+    multi_fact_json = json.dumps({
+        "fact_found": True,
+        "facts": [
+            {"fact": "החשודה נעצרה בתאריך 01/01/2026", "source_id": "chunk_10", "grounding_score": 0.85},
+            {"fact": "בוצע תחקור ראשוני בשטח על ידי הכוח העוצר", "source_id": "chunk_10", "grounding_score": 0.90},
+            {"fact": "החשודה שמרה על זכות השתיקה בחקירה הראשית", "source_id": "chunk_11", "grounding_score": 0.88}
+        ]
+    })
+    
+    async def mock_call_llm(sys, user, **kw):
+        return multi_fact_json
+        
+    monkeypatch.setattr(nodes, "call_llm", mock_call_llm)
+    
+    state = InvestigationState(
+        doc_id="case_123",
+        current_task="investigate timeline",
+        transient_synthesis_results="Rich multi-paragraph evidence context.",
+        transient_grounding_score=0.85
+    )
+    
+    cmd = await extraction_node(state, {})
+    assert isinstance(cmd, Command)
+    assert cmd.goto == "planner"
+    assert len(cmd.update["verified_facts"]) == 3
+    assert cmd.update["verified_facts"][0].fact == "החשודה נעצרה בתאריך 01/01/2026"
+    assert cmd.update["verified_facts"][1].fact == "בוצע תחקור ראשוני בשטח על ידי הכוח העוצר"
+    assert cmd.update["verified_facts"][2].fact == "החשודה שמרה על זכות השתיקה בחקירה הראשית"
+
+
+@pytest.mark.asyncio
+async def test_extraction_node_resilient_synthesis_fallback(monkeypatch):
+    from src.query_agent import nodes
+    
+    # LLM returns 0 facts (fact_count: 0)
+    async def mock_call_llm_zero_facts(sys, user, **kw):
+        return '{"fact_found": false, "facts": []}'
+        
+    monkeypatch.setattr(nodes, "call_llm", mock_call_llm_zero_facts)
+    
+    synthesis_text = (
+        "החשודה אינאס אחלאוי נחקרה באזהרה בתאריך 15/02/2026.\n"
+        "במהלך המעצר תועד עימות מילולי בין החשודה לבין המפקד בשטח.\n"
+        "החוקר ציין בפרוטוקול כי הנייד של החשודה הוחרם כראיה."
+    )
+    
+    state = InvestigationState(
+        doc_id="case_123",
+        current_task="investigate suspect timeline",
+        transient_synthesis_results=synthesis_text,
+        transient_grounding_score=0.85
+    )
+    
+    cmd = await extraction_node(state, {})
+    assert isinstance(cmd, Command)
+    assert cmd.goto == "planner"
+    # Resilient fallback extracts the synthesis lines as verified facts
+    assert len(cmd.update["verified_facts"]) >= 3
+    assert "החשודה אינאס אחלאוי נחקרה" in cmd.update["verified_facts"][0].fact
+@pytest.mark.asyncio
+async def test_verbatim_quote_extraction_and_finalizer(monkeypatch):
+    from src.query_agent import nodes
+    
+    quote_fact_json = json.dumps({
+        "fact_found": True,
+        "facts": [
+            {
+                "fact": "החשודה מסרה שאינה זוכרת את המפגש",
+                "quote": "החוקר: 'מה התרחש בפגישה?' החשודה: 'אני לא זוכרת שום דבר לגבי זה'",
+                "source_id": "chunk_42",
+                "grounding_score": 0.90
+            }
+        ]
+    })
+    
+    async def mock_call_llm(sys, user, **kw):
+        if "finalizer" in sys or "report" in sys or "פרוטוקול" in user:
+            return "דו\"ח משפטי: החשודה ציינה בעדותה מילולית: 'אני לא זוכרת שום דבר לגבי זה'."
+        return quote_fact_json
+        
+    monkeypatch.setattr(nodes, "call_llm", mock_call_llm)
+    
+    state = InvestigationState(
+        doc_id="case_123",
+        current_task="analyze dialogue",
+        transient_synthesis_results="Transcript evidence context with verbatim quotes.",
+        transient_grounding_score=0.90
+    )
+    
+    cmd = await extraction_node(state, {})
+    assert len(cmd.update["verified_facts"]) == 1
+    assert cmd.update["verified_facts"][0].quote == "החוקר: 'מה התרחש בפגישה?' החשודה: 'אני לא זוכרת שום דבר לגבי זה'"
+    
+    state.verified_facts = cmd.update["verified_facts"]
+    state.messages.append({"role": "user", "content": "מה נאמר בפגישה?"})
+    
+    res = await finalizer_node(state, {})
+    assert "דו\"ח משפטי" in res["final_answer"]
+
+
+@pytest.mark.asyncio
+async def test_graph_branch_timeline_retrieves_relationships_without_timestamp(monkeypatch):
+    from src.query_agent import nodes
+    
+    async def mock_call_llm(sys, user, **kw):
+        return '{"action": "timeline", "entity_a": "אינאס אחלאוי", "entity_b": null}'
+        
+    class MockKP:
+        def __init__(self, *a, **kw):
+            pass
+            
+        async def search_entities(self, query, top_k=3):
+            return [{"id": "person_inas", "label": "אינאס אחלאוי"}]
+            
+        async def get_entity_context(self, ent_id):
+            return {
+                "relationships": [
+                    {
+                        "relation": "INVOLVED_IN",
+                        "target_label": "מעצר אינאס אחלאוי",
+                        "metadata": {
+                            "relation_history_preview": '[{"description": "אינאס אחלאוי נעצרה ב-05/01/2026"}]'
+                        }
+                    },
+                    {
+                        "relation": "INDICTED_FOR",
+                        "target_label": "הסתה",
+                        "metadata": {}
+                    }
+                ]
+            }
+            
+    monkeypatch.setattr(nodes, "call_llm", mock_call_llm)
+    monkeypatch.setattr(nodes, "CloudKnowledgeProvider", MockKP)
+    
+    state = InvestigationState(
+        doc_id="case_123",
+        current_task="investigate timeline"
+    )
+    
+    res = await nodes.graph_branch_node(state, {})
+    assert "transient_graph_results" in res
+    graph_text = res["transient_graph_results"]
+    assert "INVOLVED_IN -> מעצר אינאס אחלאוי" in graph_text
+    assert "אינאס אחלאוי נעצרה ב-05/01/2026" in graph_text
+    assert "INDICTED_FOR -> הסתה" in graph_text
+
+
+@pytest.mark.asyncio
+async def test_rich_fact_extraction_prompt_structure():
+    from src.utils.config_manager import config_manager
+    prompt_text = await config_manager.get_config("fact_extraction_system.md")
+    
+    assert "STRICT ANTI-FRAGMENTATION RULE" in prompt_text
+    assert "NARRATIVE & TIMELINE COMPLETENESS" in prompt_text
+    assert "VERBATIM DIALOGUE & PROTOCOL QUOTES" in prompt_text
+    assert "BAD EXTRACTION EXAMPLE" in prompt_text
+    assert "GOOD EXTRACTION EXAMPLE" in prompt_text
+
+
+def test_format_compact_source():
+    from src.query_agent.nodes import _format_compact_source
+    
+    assert _format_compact_source("CHUNK 20260125015510______-26-1128__________________10") == "Page 10"
+    assert _format_compact_source("20260125015510______-26-1128__________________2") == "Page 2"
+    assert _format_compact_source("chunk_15") == "Page 15"
+    assert _format_compact_source("synthesis_fallback") == "synthesis_fallback"
+    assert _format_compact_source("Page 5") == "Page 5"
+
+
+@pytest.mark.asyncio
+async def test_synthesis_node_robust_string_check():
+    from src.query_agent.nodes import synthesis_node
+    state = InvestigationState(
+        doc_id="case_123",
+        current_task="test task",
+        transient_graph_results="Notice: Node 123 related to suspect. None of the evidence was altered."
+    )
+    
+    res = await synthesis_node(state, {})
+    assert res["transient_grounding_score"] == 0.90
+    assert "graph_query" in res["last_tool_path"]
+
+
+@pytest.mark.asyncio
+async def test_extraction_quote_grounding_auto_approval(monkeypatch):
+    from src.query_agent.nodes import extraction_node
+    
+    synthesis_text = "החשוד נעצר בתאריך 01/01/2026 בשעה 02:00."
+    state = InvestigationState(
+        doc_id="case_123",
+        current_task="test task",
+        transient_synthesis_results=synthesis_text,
+        transient_grounding_score=0.60
+    )
+    
+    async def mock_call_llm(*args, **kwargs):
+        return json.dumps({
+            "fact_found": True,
+            "facts": [
+                {
+                    "fact": "החשוד נעצר בתאריך 01/01/2026",
+                    "quote": "החשוד נעצר בתאריך 01/01/2026 בשעה 02:00.",
+                    "source_id": "chunk_1",
+                    "grounding_score": 0.60
+                }
+            ]
+        })
+        
+    monkeypatch.setattr("src.query_agent.nodes.call_llm", mock_call_llm)
+    
+    cmd = await extraction_node(state, {})
+    assert cmd.goto == "planner"
+    assert len(cmd.update["verified_facts"]) == 1
+    assert cmd.update["verified_facts"][0].fact == "החשוד נעצר בתאריך 01/01/2026"
+    assert cmd.update["pending_fact_approval"] is None
+
+
+
+
+
+
+
+
