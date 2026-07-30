@@ -39,11 +39,41 @@ def _batched(items: List[str], batch_size: int) -> List[List[str]]:
     ]
 
 
+CORS_HEADERS = {
+    "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
+    "Access-Control-Allow-Headers": "*",
+}
+
+
+def _cors_response(body: Any = "", status_code: int = 200, mimetype: str | None = None) -> func.HttpResponse:
+    return func.HttpResponse(
+        body,
+        status_code=status_code,
+        mimetype=mimetype,
+        headers=CORS_HEADERS,
+    )
+
+
+def _handle_options_request() -> func.HttpResponse:
+    return func.HttpResponse("", status_code=204, headers=CORS_HEADERS)
+
+
+def _check_status_response_with_cors(
+    client: df.DurableOrchestrationClient, req: func.HttpRequest, instance_id: str
+) -> func.HttpResponse:
+    res = client.create_check_status_response(req, instance_id)
+    for k, v in CORS_HEADERS.items():
+        res.headers[k] = v
+    return res
+
+
 def _json_response(data: Any, status_code: int = 200) -> func.HttpResponse:
     return func.HttpResponse(
         json.dumps(data, ensure_ascii=False),
         status_code=status_code,
         mimetype="application/json",
+        headers=CORS_HEADERS,
     )
 
 
@@ -429,15 +459,19 @@ async def _timeline_payload_from_gremlin(doc_id: str, limit: int = 1000) -> Dict
 # --------------------------------------------------------------------------------
 
 
-@app.route(route="ping", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="ping", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 def ping(req: func.HttpRequest) -> func.HttpResponse:
-    return func.HttpResponse("Healthy", status_code=200)
+    if req.method == "OPTIONS":
+        return _handle_options_request()
+    return _cors_response("Healthy", status_code=200)
 
 
-@app.route(route="debug_logs", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="debug_logs", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 def debug_logs(req: func.HttpRequest) -> func.HttpResponse:
+    if req.method == "OPTIONS":
+        return _handle_options_request()
     if not _is_debug_logs_enabled():
-        return func.HttpResponse("Debug logs endpoint is disabled.", status_code=404)
+        return _cors_response("Debug logs endpoint is disabled.", status_code=404)
 
     import glob
     
@@ -484,15 +518,17 @@ def debug_logs(req: func.HttpRequest) -> func.HttpResponse:
         "latest_file": latest_path,
         "content": content
     }
-    return func.HttpResponse(json.dumps(response_data, indent=2), mimetype="application/json")
+    return _json_response(response_data)
 
 
-@app.route(route="health", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="health", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 async def health_check(req: func.HttpRequest) -> func.HttpResponse:
     """
     Deep health check that verifies connectivity to all critical dependencies:
     Storage, Config, OpenAI, Cosmos DB, Search, and Document Intelligence.
     """
+    if req.method == "OPTIONS":
+        return _handle_options_request()
     trace_id = trace_id_from_request(req, prefix="health")
     started_at = time.perf_counter()
     result = await DependencyChecker().check_all(include_optional=True)
@@ -522,27 +558,25 @@ async def health_check(req: func.HttpRequest) -> func.HttpResponse:
             status=dep.get("status"),
             required=dep.get("required"),
         )
-    return func.HttpResponse(
-        json.dumps(health_status, indent=2),
-        status_code=status_code,
-        mimetype="application/json"
-    )
+    return _json_response(health_status, status_code=status_code)
 
 
-@app.route(route="cases/{docId}/graph", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="cases/{docId}/graph", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 async def get_case_graph(req: func.HttpRequest) -> func.HttpResponse:
     """
     UI graph endpoint backed by Cosmos DB Gremlin results.
     Never reads graph/{doc_id}/final.json; the doc_id is used only as partitionKey.
     """
+    if req.method == "OPTIONS":
+        return _handle_options_request()
     doc_id = req.params.get("pk") or req.route_params.get("docId")
     if not doc_id:
-        return func.HttpResponse("Missing route parameter: docId", status_code=400)
+        return _cors_response("Missing route parameter: docId", status_code=400)
 
     try:
         limit = int(req.params.get("limit", "250"))
     except ValueError:
-        return func.HttpResponse("Invalid limit parameter.", status_code=400)
+        return _cors_response("Invalid limit parameter.", status_code=400)
 
     try:
         payload = await _graph_payload_from_gremlin(doc_id, limit=limit)
@@ -570,19 +604,21 @@ async def get_case_graph(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.route(route="cases/{docId}/timeline", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="cases/{docId}/timeline", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 async def get_case_timeline(req: func.HttpRequest) -> func.HttpResponse:
     """
     UI timeline endpoint backed by dated Cosmos DB Gremlin results.
     """
+    if req.method == "OPTIONS":
+        return _handle_options_request()
     doc_id = req.params.get("pk") or req.route_params.get("docId")
     if not doc_id:
-        return func.HttpResponse("Missing route parameter: docId", status_code=400)
+        return _cors_response("Missing route parameter: docId", status_code=400)
 
     try:
         limit = int(req.params.get("limit", "1000"))
     except ValueError:
-        return func.HttpResponse("Invalid limit parameter.", status_code=400)
+        return _cors_response("Invalid limit parameter.", status_code=400)
 
     try:
         payload = await _timeline_payload_from_gremlin(doc_id, limit=limit)
@@ -610,14 +646,16 @@ async def get_case_timeline(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.route(route="cases/{docId}/report", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="cases/{docId}/report", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_case_report(req: func.HttpRequest) -> func.HttpResponse:
     """
     Returns the Markdown report generated during activity_final_indexing.
     """
+    if req.method == "OPTIONS":
+        return _handle_options_request()
     doc_id = req.route_params.get("docId")
     if not doc_id:
-        return func.HttpResponse("Missing route parameter: docId", status_code=400)
+        return _cors_response("Missing route parameter: docId", status_code=400)
 
     store = get_artifact_store()
     candidates = [
@@ -657,14 +695,16 @@ def get_case_report(req: func.HttpRequest) -> func.HttpResponse:
     )
 
 
-@app.route(route="cases/{docId}/communities", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="cases/{docId}/communities", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_case_communities(req: func.HttpRequest) -> func.HttpResponse:
     """
     Returns the community summaries generated during activity_final_indexing.
     """
+    if req.method == "OPTIONS":
+        return _handle_options_request()
     doc_id = req.route_params.get("docId")
     if not doc_id:
-        return func.HttpResponse("Missing route parameter: docId", status_code=400)
+        return _cors_response("Missing route parameter: docId", status_code=400)
 
     store = get_artifact_store()
     candidates = [
@@ -712,14 +752,16 @@ def get_case_communities(req: func.HttpRequest) -> func.HttpResponse:
     )
 
 
-@app.route(route="cases/{docId}/completeness", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="cases/{docId}/completeness", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 def get_case_completeness(req: func.HttpRequest) -> func.HttpResponse:
     """
     Returns protocol completeness analysis generated during activity_final_indexing.
     """
+    if req.method == "OPTIONS":
+        return _handle_options_request()
     doc_id = req.route_params.get("docId")
     if not doc_id:
-        return func.HttpResponse("Missing route parameter: docId", status_code=400)
+        return _cors_response("Missing route parameter: docId", status_code=400)
 
     store = get_artifact_store()
     candidates = [
@@ -758,7 +800,7 @@ def get_case_completeness(req: func.HttpRequest) -> func.HttpResponse:
     )
 
 
-@app.route(route="cases/{docId}/completeness/verify", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="cases/{docId}/completeness/verify", methods=["POST", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 @app.durable_client_input(client_name="client")
 async def verify_case_completeness_async(
     req: func.HttpRequest, client: df.DurableOrchestrationClient
@@ -767,9 +809,11 @@ async def verify_case_completeness_async(
     On-demand asynchronous verification of protocol completeness missing items using QueryAgent.
     Returns HTTP 202 Accepted response with status check URI to prevent browser timeouts.
     """
+    if req.method == "OPTIONS":
+        return _handle_options_request()
     doc_id = req.route_params.get("docId")
     if not doc_id:
-        return func.HttpResponse("Missing route parameter: docId", status_code=400)
+        return _cors_response("Missing route parameter: docId", status_code=400)
 
     trace_id = trace_id_from_request(req, prefix="completeness_verify")
     instance_id = await client.start_new(
@@ -784,7 +828,7 @@ async def verify_case_completeness_async(
     logging.info(
         f"[HTTP][COMPLETENESS_VERIFY] Started verification orchestration for doc_id {doc_id}. Instance ID: {instance_id}"
     )
-    return client.create_check_status_response(req, instance_id)
+    return _check_status_response_with_cors(client, req, instance_id)
 
 
 @app.orchestration_trigger(context_name="context")
@@ -802,26 +846,28 @@ def completeness_verification_orchestrator(context: df.DurableOrchestrationConte
 
 
 
-@app.route(route="pipelines", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="pipelines", methods=["POST", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 @app.durable_client_input(client_name="client")
 async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
     """
     Production-ready asynchronous pipeline entry point.
     Starts the orchestration and returns the instance ID.
     """
+    if req.method == "OPTIONS":
+        return _handle_options_request()
     trace_id = trace_id_from_request(req, prefix="pipeline")
     started_at = time.perf_counter()
     # 1. Validation
     MAX_SIZE_BYTES = 50 * 1024 * 1024
     file_bytes = req.get_body()
     if not file_bytes:
-        return func.HttpResponse("Missing PDF body.", status_code=400)
+        return _cors_response("Missing PDF body.", status_code=400)
     
     if len(file_bytes) > MAX_SIZE_BYTES:
-        return func.HttpResponse("File too large.", status_code=413)
+        return _cors_response("File too large.", status_code=413)
 
     if not file_bytes.startswith(b"%PDF"):
-        return func.HttpResponse("Invalid file type. Only PDF supported.", status_code=415)
+        return _cors_response("Invalid file type. Only PDF supported.", status_code=415)
 
     content_disposition = req.headers.get("Content-Disposition", "")
     match = re.search(r'filename="?([^";]+)"?', content_disposition)
@@ -895,15 +941,17 @@ async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestr
     
     logging.info(f"[HTTP] Started orchestration for {blob_path}. ID: {instance_id}")
     
-    return client.create_check_status_response(req, instance_id)
+    return _check_status_response_with_cors(client, req, instance_id)
 
 
-@app.route(route="pipeline-preflight", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="pipeline-preflight", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpResponse:
+    if req.method == "OPTIONS":
+        return _handle_options_request()
     trace_id = trace_id_from_request(req, prefix="pipeline-preflight")
     filename = req.params.get("filename") or req.params.get("doc_id") or ""
     if not filename:
-        return func.HttpResponse("Missing query parameter: filename", status_code=400)
+        return _cors_response("Missing query parameter: filename", status_code=400)
 
     try:
         result = await _case_duplicate_preflight(filename)
@@ -938,17 +986,19 @@ async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpRespon
         )
 
 
-@app.route(route="pipelines/{instanceId}", methods=["GET"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="pipelines/{instanceId}", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 @app.durable_client_input(client_name="client")
 async def get_pipeline_status(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
     """
     Retrieves the status of a specific pipeline run.
     """
+    if req.method == "OPTIONS":
+        return _handle_options_request()
     instance_id = req.route_params.get("instanceId")
     status = await client.get_status(instance_id)
     
     if not status:
-        return func.HttpResponse("Pipeline instance not found.", status_code=404)
+        return _cors_response("Pipeline instance not found.", status_code=404)
 
     response_data = {
         "instanceId": instance_id,
@@ -959,11 +1009,7 @@ async def get_pipeline_status(req: func.HttpRequest, client: df.DurableOrchestra
         "customStatus": status.custom_status
     }
 
-    return func.HttpResponse(
-        json.dumps(response_data),
-        status_code=200,
-        mimetype="application/json"
-    )
+    return _json_response(response_data)
 
 
 # --------------------------------------------------------------------------------
@@ -1473,28 +1519,30 @@ async def activity_verify_protocol_completeness(payload: dict) -> dict:
 # --------------------------------------------------------------------------------
 
 
-@app.route(route="query", methods=["POST"], auth_level=func.AuthLevel.ANONYMOUS)
+@app.route(route="query", methods=["POST", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 @app.durable_client_input(client_name="client")
 async def start_query_async(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
     """
     Stateless investigative query entry point.
     Starts the query orchestration and returns status check details.
     """
+    if req.method == "OPTIONS":
+        return _handle_options_request()
     trace_id = trace_id_from_request(req, prefix="query")
     started_at = time.perf_counter()
     try:
         req_body = req.get_json()
     except ValueError:
-        return func.HttpResponse("Invalid JSON body.", status_code=400)
+        return _cors_response("Invalid JSON body.", status_code=400)
 
     question = req_body.get("question") or ""
     doc_id = req_body.get("doc_id")
     state = req_body.get("state")
 
     if not question and not state:
-        return func.HttpResponse("Missing required field: question", status_code=400)
+        return _cors_response("Missing required field: question", status_code=400)
     if not doc_id:
-        return func.HttpResponse("Missing required field: doc_id", status_code=400)
+        return _cors_response("Missing required field: doc_id", status_code=400)
 
     instance_id = await client.start_new(
         "query_orchestrator", 
@@ -1517,7 +1565,7 @@ async def start_query_async(req: func.HttpRequest, client: df.DurableOrchestrati
     log_metric("query_start_count", 1, doc_id=doc_id)
     
     logging.info(f"[HTTP] Started query orchestration for doc_id {doc_id}. ID: {instance_id}")
-    return client.create_check_status_response(req, instance_id)
+    return _check_status_response_with_cors(client, req, instance_id)
 
 
 @app.orchestration_trigger(context_name="context")

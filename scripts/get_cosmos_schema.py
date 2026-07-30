@@ -89,5 +89,6 @@ async def delete_all_nodes():
 
 if __name__ == "__main__":
     #asyncio.run(delete_all_nodes())
-     asyncio.run(analyze_pk_distribution())
-     asyncio.run(inspect_schema())
+    asyncio.run(analyze_pk_distribution())
+    asyncio.run(inspect_schema())
+    # asyncio.run(delete_run_by_pk("sample_page_1"))  # Replace with the actual PK you want to delete

@@ -98,6 +98,14 @@ class MockReportService implements IReportService {
   public async getProtocolCompleteness(docId: string): Promise<ProtocolCompletenessResult> {
     return mockProtocolCompleteness(docId);
   }
+
+  public async verifyProtocolCompletenessWithAgent(_docId: string): Promise<string> {
+    return 'mock://completeness-status';
+  }
+
+  public async checkVerificationStatus(_statusUrl: string): Promise<{ runtimeStatus: string }> {
+    return { runtimeStatus: 'Completed' };
+  }
 }
 
 class MockTimelineService implements ITimelineService {

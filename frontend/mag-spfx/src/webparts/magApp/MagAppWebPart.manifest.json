@@ -26,7 +26,7 @@
       },
       "officeFabricIconFontName": "AnalyticsReport",
       "properties": {
-        "apiBaseUrl": "https://homkeyhakera-lagend-e7cafje6hyhfdyfk.westeurope-01.azurewebsites.net",
+        "apiBaseUrl": "http://localhost:7071",
         "functionKey": "",
         "useMockData": false,
         "pollIntervalMs": 5000,

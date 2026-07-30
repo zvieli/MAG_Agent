@@ -26,8 +26,11 @@ export interface IMagAppWebPartProps {
 export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartProps> {
   public render(): void {
     let apiBaseUrl = this.properties.apiBaseUrl || '';
+    if (!apiBaseUrl || apiBaseUrl.includes('homkeyhakera-lagend')) {
+      apiBaseUrl = 'http://localhost:7071';
+    }
     let functionKey = this.properties.functionKey || '';
-    let useMockData = this.properties.useMockData !== false;
+    let useMockData = this.properties.useMockData === true;
     let pollIntervalMs = this.properties.pollIntervalMs || 3000;
 
     let isLocalDocker = false;
