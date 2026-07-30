@@ -84,6 +84,14 @@ export interface CaseSession {
   completedAt?: string;
 }
 
+export interface SPFile {
+  name: string;
+  serverRelativeUrl: string;
+  absoluteUrl: string;
+  lastModified?: string;
+  size: number;
+}
+
 export interface GraphNode {
   id: string;
   label: string;
@@ -274,4 +282,6 @@ export interface MagAppConfig {
   useMockData: boolean;
   pollIntervalMs: number;
   enableDebugLogs: boolean;
+  sharePointSiteUrl: string;
+  sharePointFolderServerRelativeUrl: string;
 }

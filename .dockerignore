@@ -19,3 +19,5 @@ docker-compose.yml
 **/*.pyc
 **/.pytest_cache
 **/.ruff_cache
+
+.env

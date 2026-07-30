@@ -9,6 +9,7 @@ import {
   PipelineOutput,
   ProtocolCompletenessResult,
   ReportResult,
+  SPFile,
   TimelineResult
 } from '../domain/types';
 
@@ -40,12 +41,18 @@ export interface IChatService {
   getStatus(statusUrl: string, traceId?: string, startedAtMs?: number): Promise<DurableStatus<ChatAnswer>>;
 }
 
+export interface ISharePointFileService {
+  listFiles(folderServerRelativeUrl: string): Promise<SPFile[]>;
+  downloadFile(fileServerRelativeUrl: string, fileName: string): Promise<File>;
+}
+
 export interface IAppServices {
   pipeline: IPipelineService;
   graph: IGraphService;
   report: IReportService;
   timeline: ITimelineService;
   chat: IChatService;
+  sharePointFiles: ISharePointFileService;
 }
 
 export type PipelineStatus = DurableStatus<PipelineOutput>;

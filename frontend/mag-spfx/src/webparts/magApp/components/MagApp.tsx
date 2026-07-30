@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { SPHttpClient } from '@microsoft/sp-http';
 import { AppPage, MagAppConfig } from '../domain/types';
 import { createServices } from '../services/createServices';
 import { PageShell } from './PageShell';
@@ -11,11 +12,12 @@ import { ChatPage } from '../pages/ChatPage';
 
 export interface MagAppProps {
   config: MagAppConfig;
+  spHttpClient: SPHttpClient;
 }
 
-export const MagApp: React.FC<MagAppProps> = ({ config }) => {
+export const MagApp: React.FC<MagAppProps> = ({ config, spHttpClient }) => {
   const [activePage, setActivePage] = React.useState<AppPage>('upload');
-  const services = React.useMemo(() => createServices(config), [config]);
+  const services = React.useMemo(() => createServices(config, spHttpClient), [config, spHttpClient]);
   const { session, setPipeline } = useCaseSession();
 
   const navigate = (page: AppPage): void => {
@@ -40,6 +42,8 @@ export const MagApp: React.FC<MagAppProps> = ({ config }) => {
         return (
           <UploadPage
             pipelineService={services.pipeline}
+            sharePointFileService={services.sharePointFiles}
+            sharePointFolderServerRelativeUrl={config.sharePointFolderServerRelativeUrl}
             pollIntervalMs={config.pollIntervalMs}
             currentPipeline={session.pipeline}
             onPipelineChange={setPipeline}

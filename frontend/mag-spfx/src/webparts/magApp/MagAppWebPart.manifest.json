@@ -30,7 +30,9 @@
         "functionKey": "",
         "useMockData": false,
         "pollIntervalMs": 5000,
-        "enableDebugLogs": true
+        "enableDebugLogs": true,
+        "sharePointSiteUrl": "https://tikshuv.sharepoint.com/sites/MAG_Agent",
+        "sharePointFolderServerRelativeUrl": "/sites/MAG_Agent/Shared Documents/data"
       }
     }
   ]

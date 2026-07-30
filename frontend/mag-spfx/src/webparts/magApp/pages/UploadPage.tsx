@@ -1,14 +1,18 @@
 import { DefaultButton, PrimaryButton, ProgressIndicator } from '@fluentui/react';
 import * as React from 'react';
 import styles from '../components/MagApp.module.scss';
-import { isSuccessfulPipeline, isTerminalStatus } from '../domain/guards';
-import { PipelineOperation } from '../domain/types';
-import { IPipelineService } from '../services/IAppServices';
 import { StatusBadge } from '../components/StatusBadge';
+import { isSuccessfulPipeline, isTerminalStatus } from '../domain/guards';
 import { errorText, pipelinePhaseLabel, runtimeStatusLabel, technicalValue } from '../domain/localization';
+import { PipelineOperation, SPFile } from '../domain/types';
+import { IPipelineService, ISharePointFileService } from '../services/IAppServices';
+
+const MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024;
 
 export interface UploadPageProps {
   pipelineService: IPipelineService;
+  sharePointFileService: ISharePointFileService;
+  sharePointFolderServerRelativeUrl: string;
   pollIntervalMs: number;
   currentPipeline?: PipelineOperation;
   onPipelineChange: (pipeline: PipelineOperation) => void;
@@ -17,23 +21,137 @@ export interface UploadPageProps {
 
 export const UploadPage: React.FC<UploadPageProps> = ({
   pipelineService,
+  sharePointFileService,
+  sharePointFolderServerRelativeUrl,
   pollIntervalMs,
   currentPipeline,
   onPipelineChange,
   onComplete
 }) => {
-  const [files, setFiles] = React.useState<File[]>([]);
+  const [sharePointFiles, setSharePointFiles] = React.useState<SPFile[]>([]);
+  const [selectedFileUrl, setSelectedFileUrl] = React.useState<string>();
   const [operations, setOperations] = React.useState<PipelineOperation[]>(currentPipeline ? [currentPipeline] : []);
-  const [error, setError] = React.useState<string | undefined>();
+  const [error, setError] = React.useState<string>();
+  const [isLoadingFiles, setIsLoadingFiles] = React.useState(false);
   const [isStarting, setIsStarting] = React.useState(false);
+  const [isDownloading, setIsDownloading] = React.useState(false);
   const completedNavigationRef = React.useRef(false);
 
+  const selectedFile = sharePointFiles.find((file) => file.serverRelativeUrl === selectedFileUrl);
+
+  const loadSharePointFiles = React.useCallback(async (): Promise<void> => {
+    setIsLoadingFiles(true);
+    setError(undefined);
+    try {
+      const files = await sharePointFileService.listFiles(sharePointFolderServerRelativeUrl);
+      setSharePointFiles(files);
+      setSelectedFileUrl((current) =>
+        current && files.some((file) => file.serverRelativeUrl === current) ? current : undefined
+      );
+    } catch (loadError) {
+      setSharePointFiles([]);
+      setSelectedFileUrl(undefined);
+      setError(
+        loadError instanceof Error
+          ? errorText(loadError.message)
+          : 'לא ניתן לטעון את קובצי ה-PDF מ-SharePoint.'
+      );
+    } finally {
+      setIsLoadingFiles(false);
+    }
+  }, [sharePointFileService, sharePointFolderServerRelativeUrl]);
+
+  React.useEffect(() => {
+    void loadSharePointFiles();
+  }, [loadSharePointFiles]);
+
+  React.useEffect(() => {
+    if (currentPipeline && operations.length === 0) {
+      setOperations([currentPipeline]);
+    }
+  }, [currentPipeline, operations.length]);
+
+  React.useEffect(() => {
+    const running = operations.filter((operation) => !isTerminalStatus(operation.status) && operation.statusUrl);
+    if (!running.length) return;
+
+    const timer = window.setInterval(async () => {
+      try {
+        const updatedRunning = await Promise.all(running.map((operation) => pipelineService.getStatus(operation)));
+        const updatedById = new Map(updatedRunning.map((operation) => [operation.instanceId, operation]));
+        const nextOperations = operations.map((operation) => updatedById.get(operation.instanceId) || operation);
+        const completed = nextOperations.find(
+          (operation) => operation.status === 'Completed' && operation.output?.status === 'completed'
+        );
+        const failed = nextOperations.find((operation) => operation.status === 'Failed');
+        const representative = completed || nextOperations[0];
+
+        setOperations(nextOperations);
+        if (failed) {
+          setError(failed.error ? `העיבוד נכשל: ${failed.error}` : 'עיבוד המסמך נכשל.');
+        }
+        if (representative) onPipelineChange(representative);
+
+        if (completed && !completedNavigationRef.current) {
+          completedNavigationRef.current = true;
+          window.clearInterval(timer);
+          onComplete();
+        }
+      } catch (pollError) {
+        setError(
+          pollError instanceof Error ? errorText(pollError.message) : 'אירעה שגיאה בבדיקת מצב העיבוד.'
+        );
+        window.clearInterval(timer);
+      }
+    }, pollIntervalMs);
+
+    return () => window.clearInterval(timer);
+  }, [operations, onComplete, onPipelineChange, pipelineService, pollIntervalMs]);
+
+  const startPipeline = async (): Promise<void> => {
+    if (!selectedFile) {
+      setError('יש לבחור קובץ PDF מ-SharePoint.');
+      return;
+    }
+    if (selectedFile.size > MAX_PDF_SIZE_BYTES) {
+      setError('הקובץ גדול מ-50 MB ולא ניתן לעבד אותו.');
+      return;
+    }
+
+    setIsStarting(true);
+    setIsDownloading(true);
+    setError(undefined);
+    completedNavigationRef.current = false;
+
+    try {
+      const file = await sharePointFileService.downloadFile(selectedFile.serverRelativeUrl, selectedFile.name);
+      setIsDownloading(false);
+      const operation = await pipelineService.uploadAndStart(file, (progressOperation) => {
+        setOperations([progressOperation]);
+        onPipelineChange(progressOperation);
+      });
+      setOperations([operation]);
+      onPipelineChange(operation);
+
+      if (operation.status === 'Completed' && operation.output?.status === 'completed') {
+        completedNavigationRef.current = true;
+        onComplete();
+      }
+    } catch (startError) {
+      setError(startError instanceof Error ? errorText(startError.message) : 'אירעה שגיאה בהתחלת העיבוד.');
+    } finally {
+      setIsDownloading(false);
+      setIsStarting(false);
+    }
+  };
+
+  const active = operations[0] || currentPipeline;
   const clientStageLabel = (operation: PipelineOperation | undefined): string => {
     switch (operation?.clientStage) {
       case 'preflight':
         return 'בודק אם התיק כבר קיים';
       case 'uploading':
-        return 'מעלה קובץ';
+        return 'מעלה קובץ לעיבוד';
       case 'starting':
         return 'פותח עיבוד';
       case 'polling':
@@ -44,116 +162,11 @@ export const UploadPage: React.FC<UploadPageProps> = ({
         return pipelinePhaseLabel(operation?.customStatus?.phase, operation?.status);
     }
   };
-
-  const elapsedLabel = (elapsedMs: number | undefined): string => {
-    if (!elapsedMs) return '0 שניות';
-    const seconds = Math.floor(elapsedMs / 1000);
-    if (seconds < 60) return `${seconds.toLocaleString('he-IL')} שניות`;
-    const minutes = Math.floor(seconds / 60);
-    const remaining = seconds % 60;
-    return `${minutes.toLocaleString('he-IL')} דק׳ ${remaining.toLocaleString('he-IL')} שנ׳`;
-  };
-
-  React.useEffect(() => {
-    if (currentPipeline && operations.length === 0) {
-      setOperations([currentPipeline]);
-    }
-  }, [currentPipeline, operations.length]);
-
-  React.useEffect(() => {
-    const running = operations.filter((operation) => !isTerminalStatus(operation.status) && operation.statusUrl);
-    if (!running.length) {
-      return;
-    }
-
-    const timer = window.setInterval(async () => {
-      try {
-        const updatedRunning = await Promise.all(running.map((operation) => pipelineService.getStatus(operation)));
-        const updatedById = new Map(updatedRunning.map((operation) => [operation.instanceId, operation]));
-        const nextOperations = operations.map((operation) => updatedById.get(operation.instanceId) || operation);
-        const completed = nextOperations.find((operation) => operation.status === 'Completed' && operation.output?.status === 'completed');
-        const failed = nextOperations.find((operation) => operation.status === 'Failed');
-        const representative = completed || nextOperations[0];
-
-        setOperations(nextOperations);
-        if (failed) {
-          setError(failed.error ? `העיבוד נכשל: ${failed.error}` : 'העיבוד נכשל. יש לבדוק את יומני Azure עבור מופע התהליך.');
-        }
-        if (representative) {
-          onPipelineChange(representative);
-        }
-
-        if (completed && !completedNavigationRef.current) {
-          completedNavigationRef.current = true;
-          window.clearInterval(timer);
-          onComplete();
-        }
-      } catch (pollError) {
-        setError(pollError instanceof Error ? errorText(pollError.message) : 'אירעה שגיאה בבדיקת מצב העיבוד.');
-        window.clearInterval(timer);
-      }
-    }, pollIntervalMs);
-
-    return () => window.clearInterval(timer);
-  }, [operations, onComplete, onPipelineChange, pipelineService, pollIntervalMs]);
-
-  const onFileInput = (event: React.ChangeEvent<HTMLInputElement>): void => {
-    const selected = Array.from(event.target.files || []);
-    setFiles(selected);
-    setError(undefined);
-  };
-
-  const startPipeline = async (): Promise<void> => {
-    if (!files.length) {
-      setError('יש לבחור לפחות קובץ PDF אחד.');
-      return;
-    }
-
-    const invalid = files.find((file) => !file.name.toLowerCase().endsWith('.pdf'));
-    if (invalid) {
-      setError('המערכת תומכת בשלב זה בקובצי PDF בלבד.');
-      return;
-    }
-
-    setIsStarting(true);
-    setError(undefined);
-
-    try {
-      completedNavigationRef.current = false;
-      const started: PipelineOperation[] = [];
-      for (const file of files) {
-        const operation = await pipelineService.uploadAndStart(file, (progressOperation) => {
-          setOperations((current) => {
-            const existingIndex = current.findIndex((item) => item.fileName === progressOperation.fileName);
-            if (existingIndex === -1) {
-              return [...current, progressOperation];
-            }
-            return current.map((item, index) => (index === existingIndex ? { ...item, ...progressOperation } : item));
-          });
-          onPipelineChange(progressOperation);
-        });
-        started.push(operation);
-      }
-      setOperations(started);
-      onPipelineChange(started[0]);
-      const immediatelyCompleted = started.find((operation) => operation.status === 'Completed' && operation.output?.status === 'completed');
-      if (immediatelyCompleted && !completedNavigationRef.current) {
-        completedNavigationRef.current = true;
-        onPipelineChange(immediatelyCompleted);
-        onComplete();
-      }
-    } catch (startError) {
-      setError(startError instanceof Error ? errorText(startError.message) : 'אירעה שגיאה בהתחלת העיבוד.');
-    } finally {
-      setIsStarting(false);
-    }
-  };
-
-  const active = operations[0] || currentPipeline;
-  const phase = clientStageLabel(active);
+  const phase = isDownloading ? 'מוריד מ-SharePoint' : clientStageLabel(active);
   const total = active?.customStatus?.total_chunks || 0;
   const completed = active?.customStatus?.completed_chunks || 0;
-  const progress = active?.uploadProgress !== undefined ? active.uploadProgress : total > 0 ? completed / total : undefined;
+  const progress =
+    active?.uploadProgress !== undefined ? active.uploadProgress : total > 0 ? completed / total : undefined;
   const isComplete = isSuccessfulPipeline(
     active
       ? {
@@ -164,42 +177,98 @@ export const UploadPage: React.FC<UploadPageProps> = ({
         }
       : undefined
   );
-
-  const isAnyRunning = operations.some((op) => !isTerminalStatus(op.status));
+  const isAnyRunning = operations.some((operation) => !isTerminalStatus(operation.status));
+  const formatSize = (size: number): string => `${Math.max(1, Math.round(size / 1024)).toLocaleString('he-IL')} KB`;
+  const formatModified = (value: string | undefined): string =>
+    value ? new Date(value).toLocaleString('he-IL') : 'לא ידוע';
+  const elapsedLabel = (elapsedMs: number | undefined): string => {
+    if (!elapsedMs) return '0 שניות';
+    const seconds = Math.floor(elapsedMs / 1000);
+    if (seconds < 60) return `${seconds.toLocaleString('he-IL')} שניות`;
+    const minutes = Math.floor(seconds / 60);
+    return `${minutes.toLocaleString('he-IL')} דק׳ ${(seconds % 60).toLocaleString('he-IL')} שנ׳`;
+  };
 
   return (
     <div className={styles.pageGrid}>
       <section className={styles.panel}>
         <div className={styles.panelHeader}>
-          <h2>העלאת מסמכים</h2>
+          <h2>בחירת מסמך מ-SharePoint</h2>
           <StatusBadge label={isComplete ? 'מוכן' : phase} tone={isComplete ? 'success' : active ? 'running' : 'neutral'} />
         </div>
-        <label className={styles.dropZone}>
-          <i className="ms-Icon ms-Icon--CloudUpload" aria-hidden="true" />
-          <span>בחר קובצי PDF</span>
-          <input type="file" accept="application/pdf,.pdf" multiple onChange={onFileInput} />
-        </label>
-        {files.length > 0 && (
-          <div className={styles.fileList}>
-            {files.map((file) => (
-              <div key={`${file.name}-${file.size}`} className={styles.fileRow}>
-                <span className={styles.ltrValue}>{file.name}</span>
-                <small>{Math.round(file.size / 1024).toLocaleString('he-IL')} ק"ב</small>
-              </div>
-            ))}
+
+        <div className={styles.sharePointHeader}>
+          <div>
+            <strong>קובצי PDF זמינים</strong>
+            <small className={styles.sharePointPath}>{sharePointFolderServerRelativeUrl}</small>
           </div>
-        )}
-        <div className={styles.actionRow}>
-          <PrimaryButton text={isStarting ? 'מתחיל עיבוד...' : 'התחל עיבוד'} iconProps={{ iconName: 'Play' }} onClick={startPipeline} disabled={isStarting || isAnyRunning || !files.length} />
-          <DefaultButton text="נקה" iconProps={{ iconName: 'Clear' }} onClick={() => setFiles([])} disabled={isStarting || isAnyRunning} />
+          <DefaultButton
+            text={isLoadingFiles ? 'טוען...' : 'רענן'}
+            iconProps={{ iconName: 'Refresh' }}
+            onClick={() => void loadSharePointFiles()}
+            disabled={isLoadingFiles || isStarting || isAnyRunning}
+          />
         </div>
+
+        <div className={styles.fileList} role="radiogroup" aria-label="קובצי PDF ב-SharePoint">
+          {isLoadingFiles && <div className={styles.sharePointMessage}>טוען קבצים מ-SharePoint...</div>}
+          {!isLoadingFiles && sharePointFiles.length === 0 && (
+            <div className={styles.sharePointMessage}>לא נמצאו קובצי PDF בתיקייה.</div>
+          )}
+          {!isLoadingFiles &&
+            sharePointFiles.map((file) => {
+              const selected = file.serverRelativeUrl === selectedFileUrl;
+              return (
+                <label
+                  key={file.serverRelativeUrl}
+                  className={`${styles.sharePointFileRow} ${selected ? styles.selectedSharePointFile : ''}`}
+                >
+                  <input
+                    type="radio"
+                    name="sharePointPdf"
+                    value={file.serverRelativeUrl}
+                    checked={selected}
+                    onChange={() => {
+                      setSelectedFileUrl(file.serverRelativeUrl);
+                      setError(undefined);
+                    }}
+                    disabled={isStarting || isAnyRunning}
+                  />
+                  <span className={styles.sharePointFileDetails}>
+                    <strong className={styles.ltrValue}>{file.name}</strong>
+                    <small>
+                      {formatSize(file.size)} · עודכן {formatModified(file.lastModified)}
+                    </small>
+                  </span>
+                </label>
+              );
+            })}
+        </div>
+
+        <div className={styles.actionRow}>
+          <PrimaryButton
+            text={isDownloading ? 'מוריד מ-SharePoint...' : isStarting ? 'מתחיל עיבוד...' : 'התחל עיבוד'}
+            iconProps={{ iconName: 'Play' }}
+            onClick={() => void startPipeline()}
+            disabled={isLoadingFiles || isStarting || isAnyRunning || !selectedFile}
+          />
+          <DefaultButton
+            text="נקה בחירה"
+            iconProps={{ iconName: 'Clear' }}
+            onClick={() => setSelectedFileUrl(undefined)}
+            disabled={isStarting || isAnyRunning || !selectedFile}
+          />
+        </div>
+
         {operations.length > 0 && (
           <div className={styles.pipelineBox}>
             {operations.map((operation) => (
               <div key={operation.instanceId} className={styles.operationCard}>
                 <div className={styles.metaRow}>
                   <span className={styles.ltrValue}>{operation.fileName}</span>
-                  <strong>{operation.output?.reused_existing_case ? 'תיק קיים' : runtimeStatusLabel(operation.status)}</strong>
+                  <strong>
+                    {operation.output?.reused_existing_case ? 'תיק קיים' : runtimeStatusLabel(operation.status)}
+                  </strong>
                 </div>
                 <div className={styles.metaRow}>
                   <span>מזהה תיק</span>
@@ -236,8 +305,8 @@ export const UploadPage: React.FC<UploadPageProps> = ({
 
       <aside className={styles.sidePanel}>
         <h3>אופן העיבוד</h3>
-        <p>המערכת שולחת כל קובץ PDF כבקשת עיבוד נפרדת ועוקבת אחר התקדמות התור.</p>
-        <p>לאחר השלמה מוצלחת של תיק, נפתחות יכולות גרף הידע, הדו"ח והשיחה עם הסוכן.</p>
+        <p>בחר קובץ PDF מתיקיית SharePoint ולחץ על התחלת עיבוד.</p>
+        <p>הקובץ יורד באופן מאובטח בהרשאות המשתמש ולאחר מכן עובר את בדיקת הכפילות ותהליך העיבוד הרגיל.</p>
       </aside>
     </div>
   );

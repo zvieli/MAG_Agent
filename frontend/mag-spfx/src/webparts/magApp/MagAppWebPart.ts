@@ -19,6 +19,8 @@ export interface IMagAppWebPartProps {
   useMockData: boolean;
   pollIntervalMs: number;
   enableDebugLogs: boolean;
+  sharePointSiteUrl: string;
+  sharePointFolderServerRelativeUrl: string;
 }
 
 export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartProps> {
@@ -82,10 +84,13 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
       functionKey,
       useMockData,
       pollIntervalMs,
-      enableDebugLogs: this.properties.enableDebugLogs === true
+      enableDebugLogs: this.properties.enableDebugLogs === true,
+      sharePointSiteUrl: this.properties.sharePointSiteUrl || 'https://tikshuv.sharepoint.com/sites/MAG_Agent',
+      sharePointFolderServerRelativeUrl:
+        this.properties.sharePointFolderServerRelativeUrl || '/sites/MAG_Agent/Shared Documents/data'
     };
 
-    const element = React.createElement(MagApp, { config });
+    const element = React.createElement(MagApp, { config, spHttpClient: this.context.spHttpClient });
     ReactDom.render(element, this.domElement);
   }
 
@@ -126,6 +131,14 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
                   min: 1000,
                   max: 15000,
                   step: 500
+                }),
+                PropertyPaneTextField('sharePointSiteUrl', {
+                  label: 'כתובת אתר SharePoint',
+                  placeholder: 'https://tenant.sharepoint.com/sites/site'
+                }),
+                PropertyPaneTextField('sharePointFolderServerRelativeUrl', {
+                  label: 'נתיב תיקיית PDF ב-SharePoint',
+                  placeholder: '/sites/site/Shared Documents/data'
                 }),
                 PropertyPaneToggle('enableDebugLogs', {
                   label: strings.EnableDebugLogsFieldLabel,

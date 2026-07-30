@@ -162,6 +162,63 @@
   overflow: hidden;
 }
 
+.sharePointHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 12px;
+}
+
+.sharePointPath {
+  display: block;
+  margin-top: 4px;
+  color: #66788a;
+  direction: ltr;
+  text-align: left;
+}
+
+.sharePointFileRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-bottom: 1px solid #edf1f5;
+  cursor: pointer;
+
+  &:last-child {
+    border-bottom: 0;
+  }
+
+  &:hover {
+    background: #f6f8fa;
+  }
+
+  input {
+    flex: 0 0 auto;
+  }
+}
+
+.selectedSharePointFile {
+  background: #e8f3f5;
+}
+
+.sharePointFileDetails {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+
+  small {
+    color: #66788a;
+  }
+}
+
+.sharePointMessage {
+  padding: 18px 12px;
+  color: #52606d;
+  text-align: center;
+}
+
 .fileRow,
 .metaRow {
   display: flex;
