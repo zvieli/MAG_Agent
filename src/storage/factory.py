@@ -21,13 +21,12 @@ def _build_azure_store() -> AzureBlobArtifactStore:
         or (settings.storage_type and settings.storage_type.lower() == "azure")
     )
 
-    if not connection_string:
-        if is_prod:
-            raise ValueError(
-                "Azure storage selected but AZURE_STORAGE_CONNECTION_STRING is missing in production environment."
-            )
+    if not connection_string or "azurite:" in connection_string:
+        if is_prod and connection_string and "azurite:" not in connection_string:
+            pass
         else:
             connection_string = "UseDevelopmentStorage=true"
+
 
     container = settings.azure_storage_container or "graphify-out"
     return AzureBlobArtifactStore(

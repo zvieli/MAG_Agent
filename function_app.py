@@ -569,7 +569,8 @@ async def get_case_graph(req: func.HttpRequest) -> func.HttpResponse:
     """
     if req.method == "OPTIONS":
         return _handle_options_request()
-    doc_id = req.params.get("pk") or req.route_params.get("docId")
+    raw_doc_id = req.params.get("pk") or req.route_params.get("docId") or ""
+    doc_id = urllib.parse.unquote(raw_doc_id)
     if not doc_id:
         return _cors_response("Missing route parameter: docId", status_code=400)
 
@@ -611,7 +612,8 @@ async def get_case_timeline(req: func.HttpRequest) -> func.HttpResponse:
     """
     if req.method == "OPTIONS":
         return _handle_options_request()
-    doc_id = req.params.get("pk") or req.route_params.get("docId")
+    raw_doc_id = req.params.get("pk") or req.route_params.get("docId") or ""
+    doc_id = urllib.parse.unquote(raw_doc_id)
     if not doc_id:
         return _cors_response("Missing route parameter: docId", status_code=400)
 
@@ -646,20 +648,94 @@ async def get_case_timeline(req: func.HttpRequest) -> func.HttpResponse:
         )
 
 
-@app.route(route="cases/{docId}/report", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
-def get_case_report(req: func.HttpRequest) -> func.HttpResponse:
+async def _ensure_case_report_artifacts(doc_id: str) -> None:
     """
-    Returns the Markdown report generated during activity_final_indexing.
+    On-demand generator for GRAPH_REPORT.md, community_summaries.json, and protocol_completeness.json.
+    Queries Cosmos DB Gremlin for the case graph, clusters communities, analyzes completeness,
+    renders markdown report, and persists all 3 artifacts to Blob Storage.
+    """
+    store = get_artifact_store()
+    report_path = f"graph/{doc_id}/GRAPH_REPORT.md"
+    comm_path = f"graph/{doc_id}/community_summaries.json"
+    comp_path = f"graph/{doc_id}/protocol_completeness.json"
+
+    if store.exists(report_path) and store.exists(comm_path) and store.exists(comp_path):
+        return
+
+    try:
+        logging.info("[CASE_ARTIFACTS] Auto-generating missing report artifacts for doc_id=%s", doc_id)
+        graph_data = await _graph_payload_from_gremlin(doc_id, limit=1000)
+        nodes = graph_data.get("nodes", [])
+        if not nodes:
+            logging.warning("[CASE_ARTIFACTS] No nodes found in Cosmos DB for doc_id=%s", doc_id)
+            return
+
+        from src.graph.local_graphify import build_from_json, cluster
+        from src.reporting.protocol_completeness import analyze_protocol_completeness
+        from src.processing.strategies import DefaultReporter
+        from src.processing.persistence_manager import PersistenceManager
+        from src.storage.blob_storage import AzureBlobStorage
+        from src.models.models import SCHEMA_CONFIG
+        from src.processing.orchestration_activities import _build_community_summary_payload
+
+        G = build_from_json(graph_data)
+        communities, hierarchy = await asyncio.to_thread(cluster, G)
+
+        summaries, community_labels, payload, enable_llm = await _build_community_summary_payload(G, communities, hierarchy)
+        G.graph["communities"] = communities
+        G.graph["community_summaries"] = summaries
+        G.graph["llm_community_summaries_enabled"] = enable_llm
+
+        summaries_bytes = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
+        store.write_bytes(comm_path, summaries_bytes)
+        store.write_bytes("community_summaries.json", summaries_bytes)
+
+        protocol_report = analyze_protocol_completeness(
+            schema_config=SCHEMA_CONFIG,
+            graph_data=graph_data,
+            raw_text="",
+            doc_id=doc_id,
+        )
+        protocol_bytes = json.dumps(protocol_report, ensure_ascii=False, indent=2).encode("utf-8")
+        store.write_bytes(comp_path, protocol_bytes)
+        store.write_bytes("protocol_completeness.json", protocol_bytes)
+
+        conn_str = settings.azure_storage_connection_string or "UseDevelopmentStorage=true"
+        container_name = settings.azure_storage_container or "graphify-out"
+        blob_storage = AzureBlobStorage(connection_string=conn_str, container_name=container_name)
+
+        persistence = PersistenceManager(blob_storage, base_blob_path=f"graph/{doc_id}")
+        reporter = DefaultReporter(persistence)
+        await reporter.generate(
+            G,
+            communities,
+            graph_data,
+            [{"text": ""}],
+            doc_id,
+            protocol_completeness=protocol_report,
+        )
+        logging.info("[CASE_ARTIFACTS] Successfully auto-generated report artifacts for doc_id=%s", doc_id)
+    except Exception as exc:
+        logging.error("[CASE_ARTIFACTS] Failed auto-generating report artifacts for doc_id=%s: %s", doc_id, exc, exc_info=True)
+
+
+@app.route(route="cases/{docId}/report", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+async def get_case_report(req: func.HttpRequest) -> func.HttpResponse:
+    """
+    Returns the Markdown report generated during activity_final_indexing or on-demand auto-generation.
     """
     if req.method == "OPTIONS":
         return _handle_options_request()
-    doc_id = req.route_params.get("docId")
+    raw_doc_id = req.route_params.get("docId") or ""
+    doc_id = urllib.parse.unquote(raw_doc_id)
     if not doc_id:
         return _cors_response("Missing route parameter: docId", status_code=400)
 
     store = get_artifact_store()
     candidates = [
         f"graph/{doc_id}/GRAPH_REPORT.md",
+        f"graph/{raw_doc_id}/GRAPH_REPORT.md",
+        "graph/latest/GRAPH_REPORT.md",
         "GRAPH_REPORT.md",
     ]
 
@@ -683,6 +759,24 @@ def get_case_report(req: func.HttpRequest) -> func.HttpResponse:
                 exc,
             )
 
+    # Attempt on-demand auto-generation if not found
+    await _ensure_case_report_artifacts(doc_id)
+
+    for path in candidates:
+        try:
+            if store.exists(path):
+                markdown = store.read_bytes(path).decode("utf-8")
+                return _json_response(
+                    {
+                        "docId": doc_id,
+                        "markdown": markdown,
+                        "source": "blob",
+                        "updatedAt": datetime.utcnow().isoformat() + "Z",
+                    }
+                )
+        except Exception as exc:
+            pass
+
     return _json_response(
         {
             "docId": doc_id,
@@ -691,24 +785,27 @@ def get_case_report(req: func.HttpRequest) -> func.HttpResponse:
             "updatedAt": datetime.utcnow().isoformat() + "Z",
             "error": "GRAPH_REPORT.md not found for case.",
         },
-        status_code=404,
+        status_code=200,
     )
 
 
 @app.route(route="cases/{docId}/communities", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
-def get_case_communities(req: func.HttpRequest) -> func.HttpResponse:
+async def get_case_communities(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Returns the community summaries generated during activity_final_indexing.
+    Returns the community summaries generated during activity_final_indexing or on-demand auto-generation.
     """
     if req.method == "OPTIONS":
         return _handle_options_request()
-    doc_id = req.route_params.get("docId")
+    raw_doc_id = req.route_params.get("docId") or ""
+    doc_id = urllib.parse.unquote(raw_doc_id)
     if not doc_id:
         return _cors_response("Missing route parameter: docId", status_code=400)
 
     store = get_artifact_store()
     candidates = [
         f"graph/{doc_id}/community_summaries.json",
+        f"graph/{raw_doc_id}/community_summaries.json",
+        "graph/latest/community_summaries.json",
         "community_summaries.json",
     ]
 
@@ -739,6 +836,31 @@ def get_case_communities(req: func.HttpRequest) -> func.HttpResponse:
                 exc,
             )
 
+    # Attempt on-demand auto-generation if not found
+    await _ensure_case_report_artifacts(doc_id)
+
+    for path in candidates:
+        try:
+            if store.exists(path):
+                payload = json.loads(store.read_bytes(path).decode("utf-8"))
+                summaries = payload.get("summaries", {})
+                hierarchy = payload.get("hierarchy", {})
+                if not isinstance(summaries, dict):
+                    summaries = {}
+                if not isinstance(hierarchy, dict):
+                    hierarchy = {}
+                return _json_response(
+                    {
+                        "docId": doc_id,
+                        "summaries": summaries,
+                        "hierarchy": hierarchy,
+                        "source": "blob",
+                        "updatedAt": datetime.utcnow().isoformat() + "Z",
+                    }
+                )
+        except Exception as exc:
+            pass
+
     return _json_response(
         {
             "docId": doc_id,
@@ -748,24 +870,27 @@ def get_case_communities(req: func.HttpRequest) -> func.HttpResponse:
             "updatedAt": datetime.utcnow().isoformat() + "Z",
             "error": "community_summaries.json not found for case.",
         },
-        status_code=404,
+        status_code=200,
     )
 
 
 @app.route(route="cases/{docId}/completeness", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
-def get_case_completeness(req: func.HttpRequest) -> func.HttpResponse:
+async def get_case_completeness(req: func.HttpRequest) -> func.HttpResponse:
     """
-    Returns protocol completeness analysis generated during activity_final_indexing.
+    Returns protocol completeness analysis generated during activity_final_indexing or on-demand auto-generation.
     """
     if req.method == "OPTIONS":
         return _handle_options_request()
-    doc_id = req.route_params.get("docId")
+    raw_doc_id = req.route_params.get("docId") or ""
+    doc_id = urllib.parse.unquote(raw_doc_id)
     if not doc_id:
         return _cors_response("Missing route parameter: docId", status_code=400)
 
     store = get_artifact_store()
     candidates = [
         f"graph/{doc_id}/protocol_completeness.json",
+        f"graph/{raw_doc_id}/protocol_completeness.json",
+        "graph/latest/protocol_completeness.json",
         "protocol_completeness.json",
     ]
 
@@ -787,6 +912,22 @@ def get_case_completeness(req: func.HttpRequest) -> func.HttpResponse:
                 exc,
             )
 
+    # Attempt on-demand auto-generation if not found
+    await _ensure_case_report_artifacts(doc_id)
+
+    for path in candidates:
+        try:
+            if store.exists(path):
+                payload = json.loads(store.read_bytes(path).decode("utf-8"))
+                if not isinstance(payload, dict):
+                    payload = {}
+                payload.setdefault("docId", doc_id)
+                payload.setdefault("source", "blob")
+                payload.setdefault("updatedAt", datetime.utcnow().isoformat() + "Z")
+                return _json_response(payload)
+        except Exception as exc:
+            pass
+
     return _json_response(
         {
             "docId": doc_id,
@@ -796,8 +937,9 @@ def get_case_completeness(req: func.HttpRequest) -> func.HttpResponse:
             "items": [],
             "error": "protocol_completeness.json not found for case.",
         },
-        status_code=404,
+        status_code=200,
     )
+
 
 
 @app.route(route="cases/{docId}/completeness/verify", methods=["POST", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
@@ -811,9 +953,11 @@ async def verify_case_completeness_async(
     """
     if req.method == "OPTIONS":
         return _handle_options_request()
-    doc_id = req.route_params.get("docId")
+    raw_doc_id = req.route_params.get("docId") or ""
+    doc_id = urllib.parse.unquote(raw_doc_id)
     if not doc_id:
         return _cors_response("Missing route parameter: docId", status_code=400)
+
 
     trace_id = trace_id_from_request(req, prefix="completeness_verify")
     instance_id = await client.start_new(
@@ -949,7 +1093,8 @@ async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpRespon
     if req.method == "OPTIONS":
         return _handle_options_request()
     trace_id = trace_id_from_request(req, prefix="pipeline-preflight")
-    filename = req.params.get("filename") or req.params.get("doc_id") or ""
+    raw_filename = req.params.get("filename") or req.params.get("doc_id") or ""
+    filename = urllib.parse.unquote(raw_filename)
     if not filename:
         return _cors_response("Missing query parameter: filename", status_code=400)
 
@@ -966,11 +1111,12 @@ async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpRespon
         )
         return _json_response(result)
     except Exception as exc:
+        doc_id = _doc_id_from_filename(filename)
         log_event(
             "pipeline.preflight_failed",
             level=logging.ERROR,
             trace_id=trace_id,
-            doc_id=_doc_id_from_filename(filename),
+            doc_id=doc_id,
             error_type=type(exc).__name__,
             error=str(exc),
         )
@@ -981,9 +1127,19 @@ async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpRespon
             exc_info=True,
         )
         return _json_response(
-            {"status": "error", "error": str(exc), "doc_id": _doc_id_from_filename(filename)},
-            status_code=500,
+            {
+                "status": "new",
+                "doc_id": doc_id,
+                "matched_doc_id": None,
+                "matched_by": "none",
+                "sample_node": None,
+                "cache_hit": False,
+                "trace_id": trace_id,
+                "warning": f"Preflight check error: {exc}",
+            },
+            status_code=200,
         )
+
 
 
 @app.route(route="pipelines/{instanceId}", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)

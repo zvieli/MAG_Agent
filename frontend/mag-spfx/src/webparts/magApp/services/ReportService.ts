@@ -26,11 +26,22 @@ export class ReportService implements IReportService {
       }
     }
 
-    const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/report`), {
-      headers: authHeaders(this.functionKey)
-    }).then(readJson<ReportResult>);
-    await browserCache.set(cacheKey, result, reportTtlMs);
-    return { ...result, cache: { fromCache: false } };
+    try {
+      const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/report`), {
+        headers: authHeaders(this.functionKey)
+      }).then(readJson<ReportResult>);
+      await browserCache.set(cacheKey, result, reportTtlMs);
+      return { ...result, cache: { fromCache: false } };
+    } catch (err) {
+      const fallback: ReportResult = {
+        docId,
+        markdown: '',
+        source: 'blob',
+        updatedAt: new Date().toISOString(),
+        error: err instanceof Error ? err.message : 'GRAPH_REPORT.md not found'
+      };
+      return { ...fallback, cache: { fromCache: false } };
+    }
   }
 
   public async getCommunitySummaries(docId: string, options?: { forceRefresh?: boolean }): Promise<CommunitySummariesResult> {
@@ -45,11 +56,23 @@ export class ReportService implements IReportService {
       }
     }
 
-    const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/communities`), {
-      headers: authHeaders(this.functionKey)
-    }).then(readJson<CommunitySummariesResult>);
-    await browserCache.set(cacheKey, result, reportTtlMs);
-    return { ...result, cache: { fromCache: false } };
+    try {
+      const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/communities`), {
+        headers: authHeaders(this.functionKey)
+      }).then(readJson<CommunitySummariesResult>);
+      await browserCache.set(cacheKey, result, reportTtlMs);
+      return { ...result, cache: { fromCache: false } };
+    } catch (err) {
+      const fallback: CommunitySummariesResult = {
+        docId,
+        summaries: {},
+        hierarchy: {},
+        source: 'blob',
+        updatedAt: new Date().toISOString(),
+        error: err instanceof Error ? err.message : 'community_summaries.json not found'
+      };
+      return { ...fallback, cache: { fromCache: false } };
+    }
   }
 
   public async getProtocolCompleteness(docId: string, options?: { forceRefresh?: boolean }): Promise<ProtocolCompletenessResult> {
@@ -64,12 +87,25 @@ export class ReportService implements IReportService {
       }
     }
 
-    const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness`), {
-      headers: authHeaders(this.functionKey)
-    }).then(readJson<ProtocolCompletenessResult>);
-    await browserCache.set(cacheKey, result, reportTtlMs);
-    return { ...result, cache: { fromCache: false } };
+    try {
+      const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness`), {
+        headers: authHeaders(this.functionKey)
+      }).then(readJson<ProtocolCompletenessResult>);
+      await browserCache.set(cacheKey, result, reportTtlMs);
+      return { ...result, cache: { fromCache: false } };
+    } catch (err) {
+      const fallback: ProtocolCompletenessResult = {
+        docId,
+        source: 'blob',
+        updatedAt: new Date().toISOString(),
+        summary: { overallScore: 0, itemsAnalyzed: 0, missingItemsCount: 0, overallStatus: 'COMPLETE' },
+        items: [],
+        error: err instanceof Error ? err.message : 'protocol_completeness.json not found'
+      };
+      return { ...fallback, cache: { fromCache: false } };
+    }
   }
+
 
   public async verifyProtocolCompletenessWithAgent(docId: string): Promise<string> {
     const response = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness/verify`), {

@@ -213,18 +213,19 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
     setLoading(true);
     setError(undefined);
     Promise.all([
-      reportService.getReport(docId, { forceRefresh }),
+      reportService.getReport(docId, { forceRefresh }).catch(() => undefined),
       reportService.getCommunitySummaries(docId, { forceRefresh }).catch(() => undefined),
       reportService.getProtocolCompleteness(docId, { forceRefresh }).catch(() => undefined)
     ])
       .then(([result, communityResult, completenessResult]) => {
-        setReport(result);
+        if (result) setReport(result);
         setCommunities(communityResult);
         setCompleteness(completenessResult);
         setLoading(false);
       })
       .catch((reportError) => setError(reportError instanceof Error ? errorText(reportError.message) : 'אירעה שגיאה בטעינת הדו"ח.'))
       .then(() => setLoading(false));
+
   }, [docId, reportService]);
 
   const triggerAgentVerification = React.useCallback(async () => {

@@ -163,10 +163,13 @@ try:
     if not blobs:
         print('      (No graph artifacts found)')
     else:
-        for b in sorted(blobs, key=lambda x: x.last_modified, reverse=True)[:3]:
-            print(f'      - {b.name.split(\"/\")[-1]} (Modified: {b.last_modified.strftime(\"%Y-%m-%d %H:%M\")})')
-except Exception: print('      (No graph artifacts found)')
+        for b in sorted(blobs, key=lambda x: x.last_modified, reverse=True)[:5]:
+            dt = b.last_modified.strftime('%Y-%m-%d %H:%M')
+            print('      - ' + str(b.name) + ' (Modified: ' + str(dt) + ')')
+except Exception as e: print('      (No graph artifacts found)')
 "
+
+
 
 # 4.2. Cloud (Azure) - independent of Docker
 $PYTHON_CMD -c "
@@ -194,10 +197,10 @@ if cloud_conn:
         if not blobs:
             print('      (No graph artifacts found)')
         else:
-            for b in sorted(blobs, key=lambda x: x.last_modified, reverse=True)[:3]:
-                name_part = b.name.split('/')[-1]
+            for b in sorted(blobs, key=lambda x: x.last_modified, reverse=True)[:5]:
                 date_str = b.last_modified.strftime('%Y-%m-%d %H:%M')
-                print(f'      - {name_part} (Modified: {date_str})')
+                print(f'      - {b.name} (Modified: {date_str})')
+
     except Exception as e:
         print('   --- Cloud (Azure) ---')
         print(f'      [ERROR] {e}')

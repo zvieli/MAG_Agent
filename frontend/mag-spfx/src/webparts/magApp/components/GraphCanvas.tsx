@@ -73,8 +73,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graph, onSelectNode, o
       elements,
       layout: {
         name: 'cose',
-        animate: true,
-        animationDuration: 420,
+        animate: false,
         fit: true,
         padding: 54,
         nodeRepulsion: 11000,
@@ -231,11 +230,14 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graph, onSelectNode, o
 
     return () => {
       try {
-        if (cy && typeof cy.stop === 'function') {
-          cy.stop();
-        }
-        if (cy && typeof cy.destroy === 'function' && !cy.destroyed()) {
-          cy.destroy();
+        if (cy) {
+          cy.removeAllListeners();
+          if (typeof cy.stop === 'function') {
+            cy.stop();
+          }
+          if (typeof cy.destroy === 'function' && !cy.destroyed()) {
+            cy.destroy();
+          }
         }
       } catch (e) {
         // Guard against unmount race condition
@@ -255,8 +257,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graph, onSelectNode, o
     if (command.type === 'layout') {
       cy.layout({
         name: 'cose',
-        animate: true,
-        animationDuration: 500,
+        animate: false,
         fit: true,
         padding: 54,
         nodeRepulsion: 11500,
@@ -274,6 +275,7 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ graph, onSelectNode, o
       onSelectEdge(undefined);
     }
   }, [command, onSelectEdge, onSelectNode]);
+
 
   return <div ref={containerRef} className={styles.graphCanvas} role="img" aria-label="תצוגת גרף ידע" />;
 };

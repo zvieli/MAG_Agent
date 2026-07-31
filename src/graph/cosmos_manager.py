@@ -125,7 +125,10 @@ class CosmosGremlinManager:
                     exc_info=True,
                 )
                 
-                is_connection_error = any(x in err_msg for x in ["closed", "connection", "network", "socket", "broken pipe"])
+                is_connection_error = any(
+                    x in err_msg
+                    for x in ["closed", "closing", "transport", "connection", "network", "socket", "broken pipe", "websocket", "reset", "ioerror"]
+                )
                 if is_connection_error:
                     logging.warning("[COSMOS] [CONN_RESET] Resetting Gremlin client connection because of connection error.")
                     try:
@@ -133,6 +136,7 @@ class CosmosGremlinManager:
                     except Exception:
                         pass
                     self._client = None
+
                     
                 if attempt == max_retries or not is_connection_error:
                     raise
