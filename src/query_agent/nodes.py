@@ -220,7 +220,7 @@ async def hydrate_node(state: InvestigationState, config: RunnableConfig) -> Com
 
 
 # Node 2: Process HITL Node
-async def process_hitl_node(state: InvestigationState, config: RunnableConfig) -> Dict[str, Any]:
+async def process_hitl_node(state: InvestigationState, config: RunnableConfig) -> Command[Literal["halt_for_hitl", "planner"]]:
     node_name = "process_hitl"
     step = _metadata(config).get("langgraph_step", 1)
     _log_node_started(state, config, node_name)
@@ -230,11 +230,12 @@ async def process_hitl_node(state: InvestigationState, config: RunnableConfig) -
     # We must operate on copies to ensure correct state updates in LangGraph
     verified_facts = list(state.verified_facts)
     messages = list(state.messages)
+    pending_queue = list(state.pending_facts_queue)
     pending = state.pending_fact_approval
     feedback = state.user_feedback
 
     if pending:
-        feedback_clean = feedback.strip().lower()
+        feedback_clean = (feedback or "").strip().lower()
         if feedback_clean == "rejected":
             logger.info(f"[HITL_MONITOR] [REJECTED] Proposed fact '{pending.fact}' was rejected by user. Audit context: {pending.audit_trace}")
             messages.append(_hebrew_runtime_notice("העובדה המוצעת נדחתה על ידי המשתמש."))
@@ -261,12 +262,35 @@ async def process_hitl_node(state: InvestigationState, config: RunnableConfig) -
             source_id=pending.source_id,
         )
 
-    return {
-        "verified_facts": verified_facts,
-        "messages": messages,
-        "pending_fact_approval": None,
-        "user_feedback": None
-    }
+        # Remove processed pending fact from queue if present at head
+        if pending_queue and pending_queue[0].fact == pending.fact:
+            pending_queue.pop(0)
+
+    next_pending = pending_queue[0] if pending_queue else None
+    
+    if next_pending:
+        return Command(
+            update={
+                "verified_facts": verified_facts,
+                "messages": messages,
+                "pending_facts_queue": pending_queue,
+                "pending_fact_approval": next_pending,
+                "user_feedback": None
+            },
+            goto="halt_for_hitl"
+        )
+    else:
+        return Command(
+            update={
+                "verified_facts": verified_facts,
+                "messages": messages,
+                "pending_facts_queue": [],
+                "pending_fact_approval": None,
+                "user_feedback": None
+            },
+            goto="planner"
+        )
+
 
 
 # Node 3: Coordinator Node
@@ -762,14 +786,13 @@ async def extraction_node(state: InvestigationState, config: RunnableConfig) -> 
     }
     
     verified_facts = list(state.verified_facts)
-    first_hitl_pending = None
+    pending_queue = list(state.pending_facts_queue)
     
     for pending in extracted_pendings:
         requires_hitl = (pending.grounding_score < HIGH_GROUNDING_THRESHOLD or pending.conflict_detected) and not state.autonomous_mode
         
         if requires_hitl:
-            if first_hitl_pending is None:
-                first_hitl_pending = pending
+            pending_queue.append(pending)
         else:
             # Auto-approve high-grounding / autonomous facts directly into verified_facts ledger
             new_fact = VerifiedFact(
@@ -788,8 +811,10 @@ async def extraction_node(state: InvestigationState, config: RunnableConfig) -> 
                 ]
     
     updates["verified_facts"] = verified_facts
+    updates["pending_facts_queue"] = pending_queue
     
-    if first_hitl_pending:
+    if pending_queue:
+        first_hitl_pending = pending_queue[0]
         updates["pending_fact_approval"] = first_hitl_pending
         goto = "halt_for_hitl"
         log_event(
@@ -811,6 +836,7 @@ async def extraction_node(state: InvestigationState, config: RunnableConfig) -> 
             verified_added=len(verified_facts) - len(state.verified_facts),
             route=goto,
         )
+
         
     return Command(
         update=updates,

@@ -65,7 +65,10 @@ class InvestigationBaseState(BaseModel):
     messages: List[ChatMessage] = Field(default_factory=list, description="Conversation messages and thoughts")
     errors: List[str] = Field(default_factory=list, description="Warning/error traces")
     retry_count: int = 0
-    autonomous_mode: bool = Field(default=True, description="When True, runs without HITL halts")
+    autonomous_mode: bool = Field(default=False, description="When True, runs without HITL halts")
+    pending_facts_queue: List[PendingFactApproval] = Field(default_factory=list, description="Queue of pending facts awaiting HITL review")
+
+
 
 class InvestigationInputState(InvestigationBaseState):
     pending_fact_approval: Optional[PendingFactApproval] = None

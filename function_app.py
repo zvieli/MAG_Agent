@@ -1538,7 +1538,8 @@ async def start_query_async(req: func.HttpRequest, client: df.DurableOrchestrati
     question = req_body.get("question") or ""
     doc_id = req_body.get("doc_id")
     state = req_body.get("state")
-    autonomous_mode = req_body.get("autonomous_mode", True)
+    autonomous_mode = req_body.get("autonomous_mode", False)
+
 
     if not question and not state:
         return _cors_response("Missing required field: question", status_code=400)
@@ -1643,7 +1644,8 @@ async def activity_query_investigation(queryInput: dict) -> dict:
     doc_id = queryInput["doc_id"]
     state_dict = queryInput.get("state")
     trace_id = queryInput.get("trace_id")
-    autonomous_mode = queryInput.get("autonomous_mode", True)
+    autonomous_mode = queryInput.get("autonomous_mode", False)
+
     started_at = time.perf_counter()
     
     logging.info(f"[ACTIVITY][QUERY][START] doc_id: {doc_id} | question: {question[:50]}...")

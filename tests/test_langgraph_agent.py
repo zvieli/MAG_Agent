@@ -216,11 +216,12 @@ async def test_process_hitl_node():
         user_feedback="approved"
     )
     res = await process_hitl_node(state_approved, {})
-    assert len(res["verified_facts"]) == 1
-    assert res["verified_facts"][0].fact == "עדות עד המפתח"
-    assert res["verified_facts"][0].source_id == "chunk_99"
-    assert res["pending_fact_approval"] is None
-    assert res["user_feedback"] is None
+    assert len(res.update["verified_facts"]) == 1
+    assert res.update["verified_facts"][0].fact == "עדות עד המפתח"
+    assert res.update["verified_facts"][0].source_id == "chunk_99"
+    assert res.update["pending_fact_approval"] is None
+    assert res.update["user_feedback"] is None
+    assert res.goto == "planner"
 
     # Case B: Rejected
     state_rejected = InvestigationState(
@@ -229,8 +230,9 @@ async def test_process_hitl_node():
         user_feedback="rejected"
     )
     res = await process_hitl_node(state_rejected, {})
-    assert len(res["verified_facts"]) == 0
-    assert "נדחתה" in res["messages"][-1]["content"]
+    assert len(res.update["verified_facts"]) == 0
+    assert "נדחתה" in res.update["messages"][-1].content
+    assert res.goto == "planner"
 
     # Case C: Modified Text
     state_modified = InvestigationState(
@@ -239,8 +241,10 @@ async def test_process_hitl_node():
         user_feedback="עדות משוכתבת של עד המפתח"
     )
     res = await process_hitl_node(state_modified, {})
-    assert len(res["verified_facts"]) == 1
-    assert res["verified_facts"][0].fact == "עדות משוכתבת של עד המפתח"
+    assert len(res.update["verified_facts"]) == 1
+    assert res.update["verified_facts"][0].fact == "עדות משוכתבת של עד המפתח"
+    assert res.goto == "planner"
+
 
 
 @pytest.mark.asyncio
