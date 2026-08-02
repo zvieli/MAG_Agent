@@ -13,7 +13,6 @@ const navItems: { key: AppPage; label: string; icon: string; requiresCase?: bool
   { key: 'upload', label: 'העלאת קבצים', icon: 'Upload' },
   { key: 'graph', label: 'גרף ידע', icon: 'Relationship', requiresCase: true },
   { key: 'report', label: 'דו"ח ניתוח', icon: 'AnalyticsReport', requiresCase: true },
-  { key: 'timeline', label: 'ציר זמן אירועים', icon: 'TimelineProgress', requiresCase: true },
   { key: 'chat', label: 'שיחה עם הסוכן', icon: 'Chat', requiresCase: true }
 ];
 
@@ -21,14 +20,17 @@ export const PageShell: React.FC<PageShellProps> = ({ activePage, session, onNav
   <section className={styles.appShell} dir="rtl" lang="he">
     <header className={styles.header}>
       <div>
-        <h1>מערכת ניתוח תיקי חקירה</h1>
+        <h1 style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+           מערכת ניתוח תיקי חקירה
+          
+        </h1>
         <p>
           {session.docId ? (
             <>
-              תיק פעיל: <span className={styles.ltrValue}>{session.docId}</span>
+              תיק פעיל: <strong className={styles.ltrValue} style={{ color: '#0f766e' }}>{session.docId}</strong>
             </>
           ) : (
-            'יש להעלות מסמך PDF כדי להתחיל עיבוד תיק.'
+            'יש לבחור מסמך PDF מ-SharePoint להפעלת ניתוח תיק חקירה.'
           )}
         </p>
       </div>

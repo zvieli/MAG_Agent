@@ -148,6 +148,7 @@ export interface ReportResult {
   source: 'blob' | 'mock';
   updatedAt: string;
   cache?: CacheMetadata;
+  error?: string;
 }
 
 export interface CommunitySummariesResult {
@@ -228,6 +229,10 @@ export interface ProtocolCompletenessResult {
     criticalMissing?: number;
     criticalReviewRequired?: number;
     coveragePercent?: number;
+    overallScore?: number;
+    itemsAnalyzed?: number;
+    missingItemsCount?: number;
+    overallStatus?: string;
   };
   items: ProtocolCompletenessItem[];
   cache?: CacheMetadata;

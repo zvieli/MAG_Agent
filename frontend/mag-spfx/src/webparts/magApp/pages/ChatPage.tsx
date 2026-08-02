@@ -329,7 +329,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({ docId, chatService, pollInte
     const assistantMessage: ChatMessage = {
       id: makeId('assistant'),
       role: 'assistant',
-      content: 'מתחיל עיבוד חקירתי של השאלה (LangGraph)...',
+      content: 'מתחיל עיבוד חקירתי של השאלה...',
       createdAt: new Date().toISOString(),
       status: 'sending'
     };
@@ -448,7 +448,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({ docId, chatService, pollInte
       )}
 
       <div className={styles.panelHeader}>
-        <h2>שיחה עם הסוכן (LangGraph)</h2>
+        <h2>שיחה עם הסוכן</h2>
         <span>מזהה תיק: <span className={styles.ltrValue}>{docId}</span></span>
       </div>
       
@@ -572,6 +572,33 @@ export const ChatPage: React.FC<ChatPageProps> = ({ docId, chatService, pollInte
       )}
 
       {error && <div className={styles.errorBox}>{error}</div>}
+
+      <div className={styles.tacticalChipsContainer}>
+        <button
+          type="button"
+          className={styles.tacticalChip}
+          onClick={() => setDraft('הצג את גורמי המפתח והדמויות המרכזיות בתיק')}
+          disabled={Boolean(pendingFact) || Boolean(pendingStatusUrl)}
+        >
+          🔍 גורמי מפתח בתיק
+        </button>
+        <button
+          type="button"
+          className={styles.tacticalChip}
+          onClick={() => setDraft('מהם החוסרים הקריטיים והבדיקות הנדרשות בבקרת שלמות התיק?')}
+          disabled={Boolean(pendingFact) || Boolean(pendingStatusUrl)}
+        >
+          ⚠️ סקור חוסרים בראיות
+        </button>
+        <button
+          type="button"
+          className={styles.tacticalChip}
+          onClick={() => setDraft('האם זוהו סתירות או קשרים צולבים מיוחדים בין מעורבים בפרשה?')}
+          disabled={Boolean(pendingFact) || Boolean(pendingStatusUrl)}
+        >
+          💡 סתירות וקשרים צולבים
+        </button>
+      </div>
 
       <div className={styles.chatComposer}>
         <TextField

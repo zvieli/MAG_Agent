@@ -300,93 +300,114 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
           <DefaultButton text="רענן" iconProps={{ iconName: 'Refresh' }} onClick={() => loadReport(true)} disabled={loading} />
         </div>
       </div>
-      <div className={styles.reportOpinion} style={{ marginBottom: '16px', fontSize: '14px', color: '#52606d' }}>
-        ממשק אינטראקטיבי המנגיש את תובנות גרף הידע מתוך התיק לשימוש בהליכים משפטיים וחקירות נגדיות.
+      <div className={styles.infoBanner} style={{ marginBottom: '16px' }}>
+        💡 <strong>ממשק ניתוח חקירתי:</strong> מנגיש את תובנות גרף הידע לשימוש בהליכים משפטיים וחקירות נגדיות.
+        {completeness && (criticalMissing > 0 || criticalReviewRequired > 0 || conditionalMissing > 0) && (
+          <span style={{ display: 'block', marginTop: '6px', fontWeight: 600, color: criticalMissing > 0 ? '#991b1b' : '#854d0e' }}>
+            בקרת שלמות תיק: {criticalMissing} חוסרים קריטיים, {criticalReviewRequired} בדיקות קריטיות נדרשות ו-{conditionalMissing} פריטים מותנים לא אותרו.
+          </span>
+        )}
       </div>
-      {completeness && (criticalMissing > 0 || criticalReviewRequired > 0 || conditionalMissing > 0) && (
-        <div className={styles.reportOpinion} style={{
-          borderRightColor: criticalMissing > 0 ? '#a80000' : '#f0b429',
-          backgroundColor: criticalMissing > 0 ? '#fff5f5' : '#fffaf0',
-          color: criticalMissing > 0 ? '#7f1d1d' : '#4a5568'
-        }}>
-          בקרת שלמות תיק: {criticalMissing} חוסרים קריטיים, {criticalReviewRequired} בדיקות קריטיות נדרשות ו-{conditionalMissing} פריטים מותנים לא אותרו בחומר שהועלה.
-        </div>
-      )}
       {loading && <Spinner label={'טוען דו"ח'} />}
       {error && <div className={styles.errorBox}>{error}</div>}
       
       {report && parsed && (
-        <Pivot aria-label="Investigation Report Tabs" style={{ marginTop: '12px' }}>
-          <PivotItem headerText="פרופיל גורמי מפתח">
+        <>
+          <div className={styles.kpiGrid}>
+            <div className={styles.kpiCard}>
+              <span className={styles.kpiLabel}>אחוז כיסוי תיק</span>
+              <span className={styles.kpiValue} style={{ color: (completenessSummary.coveragePercent || 0) < 50 ? '#dc2626' : '#059669' }}>
+                {completenessSummary.coveragePercent || 0}%
+              </span>
+            </div>
+            <div className={styles.kpiCard}>
+              <span className={styles.kpiLabel}>גורמי מפתח בגרף</span>
+              <span className={styles.kpiValue}>{parsed.godNodes.length}</span>
+            </div>
+            <div className={styles.kpiCard}>
+              <span className={styles.kpiLabel}>קשרים צולבים</span>
+              <span className={styles.kpiValue}>{parsed.connections.length}</span>
+            </div>
+            <div className={styles.kpiCard}>
+              <span className={styles.kpiLabel}>חוסרים קריטיים</span>
+              <span className={styles.kpiValue} style={{ color: criticalMissing > 0 ? '#dc2626' : '#64748b' }}>
+                {criticalMissing}
+              </span>
+            </div>
+          </div>
+
+          <Pivot aria-label="Investigation Report Tabs" style={{ marginTop: '12px' }}>
+          <PivotItem headerText="גורמי מפתח וביסוס ראייתי">
             {parsed.godNodes.length === 0 ? (
               <div className={styles.emptyState} style={{ padding: '24px' }}>לא נמצאו גורמי מפתח מפורטים בדו"ח.</div>
             ) : (
-              <div className={styles.actorCardGrid}>
-                {parsed.godNodes.map((node, idx) => (
-                  <div key={idx} className={styles.actorCard}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                      <h3 style={{ margin: 0, color: '#0078d4', fontSize: '18px', fontWeight: '600' }}>
-                        <MarkdownView markdown={node.name} variant="inline" />
-                      </h3>
-                      <span style={{
-                        backgroundColor: '#fde7e9',
-                        color: '#a80000',
-                        padding: '2px 10px',
-                        borderRadius: '12px',
-                        fontSize: '11px',
-                        fontWeight: '600'
-                      }}>דרגת קשרים: {node.degree}</span>
-                    </div>
-                    <div style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#323130', lineHeight: '1.5' }}>
-                      <MarkdownView markdown={`**תפקיד ומשמעות:** ${node.role}`} />
-                    </div>
-                    {node.evidence && (
-                      <div style={{
-                        borderRight: '3px solid #0078d4',
-                        paddingRight: '8px',
-                        fontSize: '13px',
-                        color: '#605e5c',
-                        backgroundColor: '#f3f2f1',
-                        padding: '8px',
-                        borderRadius: '4px',
-                        fontStyle: 'italic'
-                      }}>
-                        <MarkdownView markdown={`**ציטוט מפתח:** "${node.evidence}"`} />
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', marginTop: '16px' }}>
+                <div className={styles.actorCardGrid}>
+                  {parsed.godNodes.map((node, idx) => (
+                    <div key={idx} className={styles.actorCard}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+                        <h3 style={{ margin: 0, color: '#0078d4', fontSize: '18px', fontWeight: '600' }}>
+                          <MarkdownView markdown={node.name} variant="inline" />
+                        </h3>
+                        <span style={{
+                          backgroundColor: '#fde7e9',
+                          color: '#a80000',
+                          padding: '2px 10px',
+                          borderRadius: '12px',
+                          fontSize: '11px',
+                          fontWeight: '600'
+                        }}>דרגת קשרים: {node.degree}</span>
                       </div>
-                    )}
-                  </div>
-                ))}
+                      <div style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#323130', lineHeight: '1.5' }}>
+                        <MarkdownView markdown={`**תפקיד ומשמעות:** ${node.role}`} />
+                      </div>
+                      {node.evidence && (
+                        <div style={{
+                          borderRight: '3px solid #0078d4',
+                          paddingRight: '8px',
+                          fontSize: '13px',
+                          color: '#605e5c',
+                          backgroundColor: '#f3f2f1',
+                          padding: '8px',
+                          borderRadius: '4px',
+                          fontStyle: 'italic'
+                        }}>
+                          <MarkdownView markdown={`**ציטוט מפתח:** "${node.evidence}"`} />
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ overflowX: 'auto', marginTop: '12px' }}>
+                  <h4 style={{ margin: '0 0 12px', fontSize: '16px', color: '#162033' }}>טבלת מטריצת ביסוס ראייתי</h4>
+                  <table className={styles.evidentiaryMatrix}>
+                    <thead>
+                      <tr>
+                        <th>גורם מעורב</th>
+                        <th>דרגת קשרים</th>
+                        <th>חשדות עובדתיים ותפקיד</th>
+                        <th>ביסוס ראייתי מקורי</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {parsed.godNodes.map((node, idx) => (
+                        <tr key={idx}>
+                          <td style={{ fontWeight: '600', color: '#0078d4' }}>
+                            <MarkdownView markdown={node.name} variant="inline" />
+                          </td>
+                          <td>{node.degree}</td>
+                          <td><MarkdownView markdown={node.role} /></td>
+                          <td style={{ fontSize: '13px', color: '#605e5c', fontStyle: 'italic' }}>
+                            <MarkdownView markdown={node.evidence ? `"${node.evidence}"` : 'ביסוס ישיר בגרף'} />
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
-          </PivotItem>
-
-          <PivotItem headerText="מטריצת ביסוס ראייתי">
-            <div style={{ overflowX: 'auto' }}>
-              <table className={styles.evidentiaryMatrix}>
-                <thead>
-                  <tr>
-                    <th>גורם מעורב</th>
-                    <th>דרגת קשרים</th>
-                    <th>חשדות עובדתיים ותפקיד</th>
-                    <th>ביסוס ראייתי מקורי</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {parsed.godNodes.map((node, idx) => (
-                    <tr key={idx}>
-                      <td style={{ fontWeight: '600', color: '#0078d4' }}>
-                        <MarkdownView markdown={node.name} variant="inline" />
-                      </td>
-                      <td>{node.degree}</td>
-                      <td><MarkdownView markdown={node.role} /></td>
-                      <td style={{ fontSize: '13px', color: '#605e5c', fontStyle: 'italic' }}>
-                        <MarkdownView markdown={node.evidence ? `"${node.evidence}"` : 'ביסוס ישיר בגרף'} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
           </PivotItem>
 
           <PivotItem headerText="סתירות וקשרים צולבים">
@@ -599,14 +620,8 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
               )}
             </div>
           </PivotItem>
-
-
-          <PivotItem headerText='הדו"ח המלא'>
-            <div style={{ marginTop: '16px' }}>
-              <MarkdownView markdown={report.markdown} />
-            </div>
-          </PivotItem>
         </Pivot>
+        </>
       )}
     </section>
   );

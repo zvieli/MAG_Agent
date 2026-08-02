@@ -337,6 +337,23 @@ export const GraphPage: React.FC<GraphPageProps> = ({ docId, graphService }) => 
                     ))}
                   </div>
                 )}
+                <div style={{ marginTop: '12px', marginBottom: '8px' }}>
+                  <DefaultButton
+                    text={`שאל את הסוכן על ${displayName(selectedNode.label, selectedNode.id)}`}
+                    iconProps={{ iconName: 'Chat' }}
+                    onClick={() => {
+                      if (docId) {
+                        try {
+                          const key = `mag:chat:${docId}`;
+                          const existingRaw = window.sessionStorage.getItem(key);
+                          const parsed = existingRaw ? JSON.parse(existingRaw) : { messages: [], draft: '' };
+                          parsed.draft = `סקור את הראיות והפעילות הקשורות ל-${displayName(selectedNode.label, selectedNode.id)}`;
+                          window.sessionStorage.setItem(key, JSON.stringify(parsed));
+                        } catch {}
+                      }
+                    }}
+                  />
+                </div>
                 <small>מזהה: <span className={styles.ltrValue}>{selectedNode.id}</span></small>
               </>
             )}

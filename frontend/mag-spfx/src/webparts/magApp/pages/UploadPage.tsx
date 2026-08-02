@@ -1,4 +1,4 @@
-import { DefaultButton, PrimaryButton, ProgressIndicator } from '@fluentui/react';
+import { DefaultButton, PrimaryButton, ProgressIndicator, SearchBox } from '@fluentui/react';
 import * as React from 'react';
 import styles from '../components/MagApp.module.scss';
 import { StatusBadge } from '../components/StatusBadge';
@@ -30,6 +30,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
 }) => {
   const [sharePointFiles, setSharePointFiles] = React.useState<SPFile[]>([]);
   const [selectedFileUrl, setSelectedFileUrl] = React.useState<string>();
+  const [searchQuery, setSearchQuery] = React.useState('');
   const [operations, setOperations] = React.useState<PipelineOperation[]>(currentPipeline ? [currentPipeline] : []);
   const [error, setError] = React.useState<string>();
   const [isLoadingFiles, setIsLoadingFiles] = React.useState(false);
@@ -191,6 +192,10 @@ export const UploadPage: React.FC<UploadPageProps> = ({
 
   return (
     <div className={styles.pageGrid}>
+      <div className={styles.infoBanner}>
+        💡 <strong>אופן העיבוד:</strong> בחר קובץ PDF מתיקיית SharePoint ולחץ על "התחל עיבוד". הקובץ יורד באופן מאובטח בהרשאות המשתמש ולאחר מכן עובר בדיקת כפילויות ותהליך עיבוד חכם.
+      </div>
+
       <section className={styles.panel}>
         <div className={styles.panelHeader}>
           <h2>בחירת מסמך מ-SharePoint</h2>
@@ -202,12 +207,20 @@ export const UploadPage: React.FC<UploadPageProps> = ({
             <strong>קובצי PDF זמינים</strong>
             <small className={styles.sharePointPath}>{sharePointFolderServerRelativeUrl}</small>
           </div>
-          <DefaultButton
-            text={isLoadingFiles ? 'טוען...' : 'רענן'}
-            iconProps={{ iconName: 'Refresh' }}
-            onClick={() => void loadSharePointFiles()}
-            disabled={isLoadingFiles || isStarting || isAnyRunning}
-          />
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <SearchBox
+              placeholder="סינון קבצים..."
+              value={searchQuery}
+              onChange={(_, value) => setSearchQuery(value || '')}
+              styles={{ root: { width: 200 } }}
+            />
+            <DefaultButton
+              text={isLoadingFiles ? 'טוען...' : 'רענן'}
+              iconProps={{ iconName: 'Refresh' }}
+              onClick={() => void loadSharePointFiles()}
+              disabled={isLoadingFiles || isStarting || isAnyRunning}
+            />
+          </div>
         </div>
 
         <div className={styles.fileList} role="radiogroup" aria-label="קובצי PDF ב-SharePoint">
@@ -216,33 +229,35 @@ export const UploadPage: React.FC<UploadPageProps> = ({
             <div className={styles.sharePointMessage}>לא נמצאו קובצי PDF בתיקייה.</div>
           )}
           {!isLoadingFiles &&
-            sharePointFiles.map((file) => {
-              const selected = file.serverRelativeUrl === selectedFileUrl;
-              return (
-                <label
-                  key={file.serverRelativeUrl}
-                  className={`${styles.sharePointFileRow} ${selected ? styles.selectedSharePointFile : ''}`}
-                >
-                  <input
-                    type="radio"
-                    name="sharePointPdf"
-                    value={file.serverRelativeUrl}
-                    checked={selected}
-                    onChange={() => {
-                      setSelectedFileUrl(file.serverRelativeUrl);
-                      setError(undefined);
-                    }}
-                    disabled={isStarting || isAnyRunning}
-                  />
-                  <span className={styles.sharePointFileDetails}>
-                    <strong className={styles.ltrValue}>{file.name}</strong>
-                    <small>
-                      {formatSize(file.size)} · עודכן {formatModified(file.lastModified)}
-                    </small>
-                  </span>
-                </label>
-              );
-            })}
+            sharePointFiles
+              .filter((file) => !searchQuery || file.name.toLowerCase().includes(searchQuery.toLowerCase()))
+              .map((file) => {
+                const selected = file.serverRelativeUrl === selectedFileUrl;
+                return (
+                  <label
+                    key={file.serverRelativeUrl}
+                    className={`${styles.sharePointFileRow} ${selected ? styles.selectedSharePointFile : ''}`}
+                  >
+                    <input
+                      type="radio"
+                      name="sharePointPdf"
+                      value={file.serverRelativeUrl}
+                      checked={selected}
+                      onChange={() => {
+                        setSelectedFileUrl(file.serverRelativeUrl);
+                        setError(undefined);
+                      }}
+                      disabled={isStarting || isAnyRunning}
+                    />
+                    <span className={styles.sharePointFileDetails}>
+                      <strong className={styles.ltrValue}>{file.name}</strong>
+                      <small>
+                        {formatSize(file.size)} · עודכן {formatModified(file.lastModified)}
+                      </small>
+                    </span>
+                  </label>
+                );
+              })}
         </div>
 
         <div className={styles.actionRow}>
@@ -262,8 +277,23 @@ export const UploadPage: React.FC<UploadPageProps> = ({
 
         {operations.length > 0 && (
           <div className={styles.pipelineBox}>
+            <div className={styles.stepperBox}>
+              <div className={`${styles.stepperItem} ${isDownloading ? styles.stepperActive : styles.stepperDone}`}>
+                <span>1. הורדה מ-SharePoint</span>
+              </div>
+              <div className={`${styles.stepperItem} ${active?.clientStage === 'preflight' ? styles.stepperActive : isComplete || active?.clientStage !== 'starting' ? styles.stepperDone : ''}`}>
+                <span>2. בדיקת כפילות</span>
+              </div>
+              <div className={`${styles.stepperItem} ${active?.clientStage === 'processing' || active?.clientStage === 'polling' ? styles.stepperActive : isComplete ? styles.stepperDone : ''}`}>
+                <span>3. יצירת גרף ידע</span>
+              </div>
+              <div className={`${styles.stepperItem} ${isComplete ? styles.stepperDone : ''}`}>
+                <span>4. תיק מוכן לפעילות</span>
+              </div>
+            </div>
+
             {operations.map((operation) => (
-              <div key={operation.instanceId} className={styles.operationCard}>
+              <div key={operation.instanceId} className={styles.operationCard} style={{ marginTop: '12px' }}>
                 <div className={styles.metaRow}>
                   <span className={styles.ltrValue}>{operation.fileName}</span>
                   <strong>
@@ -292,22 +322,16 @@ export const UploadPage: React.FC<UploadPageProps> = ({
                 {operation.output?.reused_existing_case && (
                   <div className={styles.metaRow}>
                     <span>פעולה</span>
-                    <strong>העיבוד דולג ונפתח התיק הקיים</strong>
+                    <strong>נמצא גרף קיים לתיק</strong>
                   </div>
                 )}
               </div>
             ))}
-            <ProgressIndicator label={phase} percentComplete={progress} />
+            <ProgressIndicator label={phase} percentComplete={progress} styles={{ root: { marginTop: '8px' } }} />
           </div>
         )}
         {error && <div className={styles.errorBox}>{error}</div>}
       </section>
-
-      <aside className={styles.sidePanel}>
-        <h3>אופן העיבוד</h3>
-        <p>בחר קובץ PDF מתיקיית SharePoint ולחץ על התחלת עיבוד.</p>
-        <p>הקובץ יורד באופן מאובטח בהרשאות המשתמש ולאחר מכן עובר את בדיקת הכפילות ותהליך העיבוד הרגיל.</p>
-      </aside>
     </div>
   );
 };
