@@ -688,7 +688,6 @@ async def _ensure_case_report_artifacts(doc_id: str) -> None:
 
         summaries_bytes = json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8")
         store.write_bytes(comm_path, summaries_bytes)
-        store.write_bytes("community_summaries.json", summaries_bytes)
 
         protocol_report = analyze_protocol_completeness(
             schema_config=SCHEMA_CONFIG,
@@ -698,7 +697,6 @@ async def _ensure_case_report_artifacts(doc_id: str) -> None:
         )
         protocol_bytes = json.dumps(protocol_report, ensure_ascii=False, indent=2).encode("utf-8")
         store.write_bytes(comp_path, protocol_bytes)
-        store.write_bytes("protocol_completeness.json", protocol_bytes)
 
         conn_str = settings.azure_storage_connection_string or "UseDevelopmentStorage=true"
         container_name = settings.azure_storage_container or "graphify-out"
@@ -735,8 +733,6 @@ async def get_case_report(req: func.HttpRequest) -> func.HttpResponse:
     candidates = [
         f"graph/{doc_id}/GRAPH_REPORT.md",
         f"graph/{raw_doc_id}/GRAPH_REPORT.md",
-        "graph/latest/GRAPH_REPORT.md",
-        "GRAPH_REPORT.md",
     ]
 
     for path in candidates:
@@ -805,8 +801,6 @@ async def get_case_communities(req: func.HttpRequest) -> func.HttpResponse:
     candidates = [
         f"graph/{doc_id}/community_summaries.json",
         f"graph/{raw_doc_id}/community_summaries.json",
-        "graph/latest/community_summaries.json",
-        "community_summaries.json",
     ]
 
     for path in candidates:
@@ -890,8 +884,6 @@ async def get_case_completeness(req: func.HttpRequest) -> func.HttpResponse:
     candidates = [
         f"graph/{doc_id}/protocol_completeness.json",
         f"graph/{raw_doc_id}/protocol_completeness.json",
-        "graph/latest/protocol_completeness.json",
-        "protocol_completeness.json",
     ]
 
     for path in candidates:
