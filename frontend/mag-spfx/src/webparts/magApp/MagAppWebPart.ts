@@ -25,14 +25,6 @@ export interface IMagAppWebPartProps {
 
 export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartProps> {
   public render(): void {
-    let apiBaseUrl = this.properties.apiBaseUrl || '';
-    if (!apiBaseUrl || apiBaseUrl.includes('homkeyhakera-lagend')) {
-      apiBaseUrl = 'http://localhost:7071';
-    }
-    let functionKey = this.properties.functionKey || '';
-    let useMockData = this.properties.useMockData === true;
-    let pollIntervalMs = this.properties.pollIntervalMs || 3000;
-
     let isLocalDocker = false;
     let envApiTarget: string | undefined = undefined;
     let envFunctionKey: string | undefined = undefined;
@@ -44,7 +36,7 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
     } catch (e) { /* process is not defined */ }
 
     try {
-      envApiTarget = process.env.VITE_API_TARGET;
+      envApiTarget = process.env.VITE_AZURE_API_TARGET || process.env.VITE_API_TARGET;
     } catch (e) { /* process is not defined */ }
 
     try {
@@ -59,17 +51,18 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
       envPollIntervalMs = process.env.VITE_POLL_INTERVAL_MS;
     } catch (e) { /* process is not defined */ }
 
-    if (isLocalDocker) {
-      apiBaseUrl = 'http://localhost:7071';
-      functionKey = envFunctionKey || '';
-    } else {
-      if (envApiTarget) {
+    let apiBaseUrl = this.properties.apiBaseUrl || '';
+    if (!apiBaseUrl) {
+      if (isLocalDocker) {
+        apiBaseUrl = process.env.VITE_API_TARGET || 'http://localhost:7071';
+      } else if (envApiTarget) {
         apiBaseUrl = envApiTarget;
       }
-      if (envFunctionKey) {
-        functionKey = envFunctionKey;
-      }
     }
+
+    let functionKey = this.properties.functionKey || envFunctionKey || '';
+    let useMockData = this.properties.useMockData === true;
+    let pollIntervalMs = this.properties.pollIntervalMs || 3000;
 
     if (envUseMockData !== undefined) {
       useMockData = envUseMockData === 'true';

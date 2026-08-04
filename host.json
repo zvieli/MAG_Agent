@@ -22,6 +22,15 @@
     "version": "[4.*, 5.0.0)"
   },
   "extensions": {
+    "http": {
+      "cors": {
+        "allowedOrigins": [
+          "https://tikshuv.sharepoint.com",
+          "*"
+        ],
+        "supportCredentials": false
+      }
+    },
     "durableTask": {
       "hubName": "TestHubName",
       "storageProvider": {

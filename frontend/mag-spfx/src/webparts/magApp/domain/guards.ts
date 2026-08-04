@@ -41,11 +41,7 @@ export const deriveDocId = (fileName: string, status?: DurableStatus<PipelineOut
 };
 
 export const normalizeApiBaseUrl = (apiBaseUrl: string): string => {
-  const clean = (apiBaseUrl || '').trim().replace(/\/+$/, '');
-  if (!clean || clean.includes('homkeyhakera-lagend')) {
-    return 'http://localhost:7071';
-  }
-  return clean;
+  return (apiBaseUrl || '').trim().replace(/\/+$/, '');
 };
 
 export const makeId = (prefix: string): string =>

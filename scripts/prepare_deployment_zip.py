@@ -37,7 +37,11 @@ def build_spfx_solution(project_dir: Path):
     
     sppkg_file = spfx_dir / "sharepoint/solution/mag-spfx.sppkg"
     if sppkg_file.exists():
-        print(f"SPFx solution successfully packaged at: {sppkg_file}\n")
+        import shutil
+        target_sppkg = project_dir / "mag-spfx.sppkg"
+        shutil.copy(sppkg_file, target_sppkg)
+        print(f"SPFx solution successfully packaged at: {sppkg_file}")
+        print(f"Copied package to repository root: {target_sppkg}\n")
     else:
         print("Warning: Build succeeded but .sppkg file was not found.\n")
 

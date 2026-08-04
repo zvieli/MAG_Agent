@@ -6,7 +6,15 @@
     "version": "0.1.0.0",
     "includeClientSideAssets": true,
     "skipFeatureDeployment": true,
-    "isDomainIsolated": false
+    "isDomainIsolated": false,
+    "features": [
+      {
+        "title": "mag-spfx Feature",
+        "description": "Feature for mag-spfx client-side solution",
+        "id": "7864f1d2-bb92-48bd-8750-678c2e54f214",
+        "version": "1.0.0.0"
+      }
+    ]
   },
   "paths": {
     "zippedPackage": "solution/mag-spfx.sppkg"

@@ -1,5 +1,6 @@
 import json
 import inspect
+import shutil
 from pathlib import Path
 
 import function_app
@@ -21,6 +22,13 @@ def _json_safe(value):
 
 def main() -> None:
     OUTPUT_DIR = ROOT / "src" / "operations"
+    
+    # Clean up existing generated function subdirectories
+    if OUTPUT_DIR.exists():
+        for path in OUTPUT_DIR.iterdir():
+            if path.is_dir() and path.name not in ("__pycache__", "logs") and (path / "function.json").exists():
+                shutil.rmtree(path, ignore_errors=True)
+
     wrapper_lines = [
         '"""Generated plain entry points for Azure Functions v1 metadata."""',
         "import sys",

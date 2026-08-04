@@ -42,38 +42,50 @@ def _batched(items: List[str], batch_size: int) -> List[List[str]]:
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
-    "Access-Control-Allow-Headers": "*",
+    "Access-Control-Allow-Headers": "x-mag-trace-id, x-functions-key, content-disposition, content-type, authorization, accept, origin, x-requested-with, *",
+    "Access-Control-Max-Age": "86400",
 }
 
 
-def _cors_response(body: Any = "", status_code: int = 200, mimetype: str | None = None) -> func.HttpResponse:
+def _get_cors_headers_for_req(req: func.HttpRequest | None = None) -> Dict[str, str]:
+    headers = dict(CORS_HEADERS)
+    if req:
+        origin = req.headers.get("origin") or req.headers.get("Origin")
+        if origin:
+            headers["Access-Control-Allow-Origin"] = origin
+    return headers
+
+
+def _cors_response(
+    body: Any = "", status_code: int = 200, mimetype: str | None = None, req: func.HttpRequest | None = None
+) -> func.HttpResponse:
     return func.HttpResponse(
         body,
         status_code=status_code,
         mimetype=mimetype,
-        headers=CORS_HEADERS,
+        headers=_get_cors_headers_for_req(req),
     )
 
 
-def _handle_options_request() -> func.HttpResponse:
-    return func.HttpResponse("", status_code=204, headers=CORS_HEADERS)
+def _handle_options_request(req: func.HttpRequest | None = None) -> func.HttpResponse:
+    return func.HttpResponse("", status_code=204, headers=_get_cors_headers_for_req(req))
 
 
 def _check_status_response_with_cors(
     client: df.DurableOrchestrationClient, req: func.HttpRequest, instance_id: str
 ) -> func.HttpResponse:
     res = client.create_check_status_response(req, instance_id)
-    for k, v in CORS_HEADERS.items():
+    for k, v in _get_cors_headers_for_req(req).items():
         res.headers[k] = v
     return res
 
 
-def _json_response(data: Any, status_code: int = 200) -> func.HttpResponse:
+def _json_response(data: Any, status_code: int = 200, req: func.HttpRequest | None = None) -> func.HttpResponse:
     return func.HttpResponse(
         json.dumps(data, ensure_ascii=False),
         status_code=status_code,
         mimetype="application/json",
-        headers=CORS_HEADERS,
+        headers=_get_cors_headers_for_req(req),
     )
 
 
@@ -1083,12 +1095,12 @@ async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestr
 @app.route(route="pipeline-preflight", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpResponse:
     if req.method == "OPTIONS":
-        return _handle_options_request()
+        return _handle_options_request(req)
     trace_id = trace_id_from_request(req, prefix="pipeline-preflight")
     raw_filename = req.params.get("filename") or req.params.get("doc_id") or ""
     filename = urllib.parse.unquote(raw_filename)
     if not filename:
-        return _cors_response("Missing query parameter: filename", status_code=400)
+        return _cors_response("Missing query parameter: filename", status_code=400, req=req)
 
     try:
         result = await _case_duplicate_preflight(filename)
@@ -1101,7 +1113,7 @@ async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpRespon
             matched_doc_id=result.get("matched_doc_id"),
             matched_by=result.get("matched_by"),
         )
-        return _json_response(result)
+        return _json_response(result, req=req)
     except Exception as exc:
         doc_id = _doc_id_from_filename(filename)
         log_event(
