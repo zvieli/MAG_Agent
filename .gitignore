@@ -55,4 +55,5 @@ docs
 tzr_guidelines
 logs.txt
 diff.txt
-docs
+docker/nginx/certs/*.crt
+docker/nginx/certs/*.key
