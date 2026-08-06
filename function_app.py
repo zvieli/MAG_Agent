@@ -23,6 +23,7 @@ from src.operations.dependency_checker import DependencyChecker
 from src.query_agent.query_agent import QueryAgent
 from src.models.models import SCHEMA_CONFIG  # noqa: F401 # Forces loading schema into memory cache during worker init
 from src.utils.observability import calculate_estimated_cost, log_event, log_metric, trace_id_from_request
+from src.auth.decorators import require_token_auth
 
 # Initialize the Durable Functions App (Python V2 Model)
 app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
@@ -42,7 +43,7 @@ def _batched(items: List[str], batch_size: int) -> List[List[str]]:
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
-    "Access-Control-Allow-Headers": "*",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, x-functions-key, *",
     "Access-Control-Max-Age": "86400",
 }
 
@@ -58,7 +59,10 @@ def _get_cors_headers_for_req(req: func.HttpRequest | None = None) -> Dict[str, 
             or req.headers.get("Access-Control-Request-Headers")
         )
         if req_headers:
-            headers["Access-Control-Allow-Headers"] = req_headers
+            header_list = [h.strip() for h in req_headers.split(",")]
+            if not any(h.lower() == "authorization" for h in header_list):
+                header_list.append("Authorization")
+            headers["Access-Control-Allow-Headers"] = ", ".join(header_list)
     return headers
 
 
@@ -478,6 +482,7 @@ async def _timeline_payload_from_gremlin(doc_id: str, limit: int = 1000) -> Dict
 
 
 @app.route(route="ping", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+@require_token_auth
 def ping(req: func.HttpRequest) -> func.HttpResponse:
     if req.method == "OPTIONS":
         return _handle_options_request()
@@ -485,6 +490,7 @@ def ping(req: func.HttpRequest) -> func.HttpResponse:
 
 
 @app.route(route="debug_logs", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+@require_token_auth
 def debug_logs(req: func.HttpRequest) -> func.HttpResponse:
     if req.method == "OPTIONS":
         return _handle_options_request()
@@ -540,6 +546,7 @@ def debug_logs(req: func.HttpRequest) -> func.HttpResponse:
 
 
 @app.route(route="health", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+@require_token_auth
 async def health_check(req: func.HttpRequest) -> func.HttpResponse:
     """
     Deep health check that verifies connectivity to all critical dependencies:
@@ -580,6 +587,7 @@ async def health_check(req: func.HttpRequest) -> func.HttpResponse:
 
 
 @app.route(route="cases/{docId}/graph", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+@require_token_auth
 async def get_case_graph(req: func.HttpRequest) -> func.HttpResponse:
     """
     UI graph endpoint backed by Cosmos DB Gremlin results.
@@ -624,6 +632,7 @@ async def get_case_graph(req: func.HttpRequest) -> func.HttpResponse:
 
 
 @app.route(route="cases/{docId}/timeline", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+@require_token_auth
 async def get_case_timeline(req: func.HttpRequest) -> func.HttpResponse:
     """
     UI timeline endpoint backed by dated Cosmos DB Gremlin results.
@@ -736,6 +745,7 @@ async def _ensure_case_report_artifacts(doc_id: str) -> None:
 
 
 @app.route(route="cases/{docId}/report", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+@require_token_auth
 async def get_case_report(req: func.HttpRequest) -> func.HttpResponse:
     """
     Returns the Markdown report generated during activity_final_indexing or on-demand auto-generation.
@@ -804,6 +814,7 @@ async def get_case_report(req: func.HttpRequest) -> func.HttpResponse:
 
 
 @app.route(route="cases/{docId}/communities", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+@require_token_auth
 async def get_case_communities(req: func.HttpRequest) -> func.HttpResponse:
     """
     Returns the community summaries generated during activity_final_indexing or on-demand auto-generation.
@@ -887,6 +898,7 @@ async def get_case_communities(req: func.HttpRequest) -> func.HttpResponse:
 
 
 @app.route(route="cases/{docId}/completeness", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+@require_token_auth
 async def get_case_completeness(req: func.HttpRequest) -> func.HttpResponse:
     """
     Returns protocol completeness analysis generated during activity_final_indexing or on-demand auto-generation.
@@ -954,6 +966,7 @@ async def get_case_completeness(req: func.HttpRequest) -> func.HttpResponse:
 
 @app.route(route="cases/{docId}/completeness/verify", methods=["POST", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 @app.durable_client_input(client_name="client")
+@require_token_auth
 async def verify_case_completeness_async(
     req: func.HttpRequest, client: df.DurableOrchestrationClient
 ) -> func.HttpResponse:
@@ -1002,6 +1015,7 @@ def completeness_verification_orchestrator(context: df.DurableOrchestrationConte
 
 @app.route(route="pipelines", methods=["POST", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 @app.durable_client_input(client_name="client")
+@require_token_auth
 async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
     """
     Production-ready asynchronous pipeline entry point.
@@ -1099,6 +1113,7 @@ async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestr
 
 
 @app.route(route="pipeline-preflight", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
+@require_token_auth
 async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpResponse:
     if req.method == "OPTIONS":
         return _handle_options_request(req)
@@ -1155,6 +1170,7 @@ async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpRespon
 
 @app.route(route="pipelines/{instanceId}", methods=["GET", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 @app.durable_client_input(client_name="client")
+@require_token_auth
 async def get_pipeline_status(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
     """
     Retrieves the status of a specific pipeline run.
@@ -1688,6 +1704,7 @@ async def activity_verify_protocol_completeness(payload: dict) -> dict:
 
 @app.route(route="query", methods=["POST", "OPTIONS"], auth_level=func.AuthLevel.ANONYMOUS)
 @app.durable_client_input(client_name="client")
+@require_token_auth
 async def start_query_async(req: func.HttpRequest, client: df.DurableOrchestrationClient) -> func.HttpResponse:
     """
     Stateless investigative query entry point.

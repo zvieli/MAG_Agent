@@ -28,6 +28,12 @@
           "https://tikshuv.sharepoint.com",
           "*"
         ],
+        "allowedHeaders": [
+          "Authorization",
+          "Content-Type",
+          "x-functions-key",
+          "*"
+        ],
         "supportCredentials": false
       }
     },
