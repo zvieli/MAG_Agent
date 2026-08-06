@@ -9,6 +9,7 @@ import { PipelineService } from './PipelineService';
 import { ReportService } from './ReportService';
 import { TimelineService } from './TimelineService';
 import { SharePointFileService } from './SharePointFileService';
+import { TokenService } from './TokenService';
 
 export const createServices = (config: MagAppConfig, spHttpClient: SPHttpClient): IAppServices => {
   const logger = createDebugLogger(config.enableDebugLogs);
@@ -18,14 +19,20 @@ export const createServices = (config: MagAppConfig, spHttpClient: SPHttpClient)
     return { ...createMockServices(), sharePointFiles };
   }
 
-  const graph = new GraphService(config.apiBaseUrl, config.functionKey, logger);
+  const tokenService = new TokenService(
+    config.aadTokenProviderFactory,
+    config.backendAppIdUri || 'api://<backend-app-id>',
+    logger
+  );
+
+  const graph = new GraphService(config.apiBaseUrl, config.functionKey, tokenService, logger);
 
   return {
-    pipeline: new PipelineService(config.apiBaseUrl, config.functionKey, logger),
+    pipeline: new PipelineService(config.apiBaseUrl, config.functionKey, tokenService, logger),
     graph,
-    report: new ReportService(config.apiBaseUrl, config.functionKey),
+    report: new ReportService(config.apiBaseUrl, config.functionKey, tokenService),
     timeline: new TimelineService(graph),
-    chat: new ChatService(config.apiBaseUrl, config.functionKey, logger),
+    chat: new ChatService(config.apiBaseUrl, config.functionKey, tokenService, logger),
     sharePointFiles
   };
 };

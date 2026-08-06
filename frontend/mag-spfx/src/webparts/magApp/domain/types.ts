@@ -1,3 +1,5 @@
+import { AadTokenProviderFactory } from '@microsoft/sp-http';
+
 export type AppPage = 'upload' | 'graph' | 'report' | 'timeline' | 'chat';
 
 export type RuntimeStatus =
@@ -289,4 +291,6 @@ export interface MagAppConfig {
   enableDebugLogs: boolean;
   sharePointSiteUrl: string;
   sharePointFolderServerRelativeUrl: string;
+  aadTokenProviderFactory?: AadTokenProviderFactory;
+  backendAppIdUri?: string;
 }

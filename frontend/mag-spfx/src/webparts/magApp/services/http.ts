@@ -17,24 +17,44 @@ export const apiUrl = (apiBaseUrl: string, path: string): string => {
   return `${base}${normalizedPath}`;
 };
 
-export const authHeaders = (functionKey: string, extraHeaders?: HeadersInit): HeadersInit => {
+export const authHeaders = (
+  functionKey?: string,
+  bearerTokenOrExtraHeaders?: string | HeadersInit,
+  extraHeaders?: HeadersInit
+): HeadersInit => {
   const headers: Record<string, string> = {};
-  const normalizedKey = functionKey.trim();
 
-  if (normalizedKey) {
-    headers['x-functions-key'] = normalizedKey;
+  if (functionKey) {
+    const normalizedKey = functionKey.trim();
+    if (normalizedKey) {
+      headers['x-functions-key'] = normalizedKey;
+    }
   }
 
-  if (extraHeaders instanceof Headers) {
-    extraHeaders.forEach((value, key) => {
+  let bearerToken: string | undefined;
+  let actualExtraHeaders: HeadersInit | undefined;
+
+  if (typeof bearerTokenOrExtraHeaders === 'string') {
+    bearerToken = bearerTokenOrExtraHeaders;
+    actualExtraHeaders = extraHeaders;
+  } else if (bearerTokenOrExtraHeaders) {
+    actualExtraHeaders = bearerTokenOrExtraHeaders;
+  }
+
+  if (bearerToken && bearerToken.trim()) {
+    headers['Authorization'] = `Bearer ${bearerToken.trim()}`;
+  }
+
+  if (actualExtraHeaders instanceof Headers) {
+    actualExtraHeaders.forEach((value, key) => {
       headers[key] = value;
     });
-  } else if (Array.isArray(extraHeaders)) {
-    for (const [key, value] of extraHeaders) {
+  } else if (Array.isArray(actualExtraHeaders)) {
+    for (const [key, value] of actualExtraHeaders) {
       headers[key] = value;
     }
-  } else if (extraHeaders) {
-    Object.assign(headers, extraHeaders);
+  } else if (actualExtraHeaders) {
+    Object.assign(headers, actualExtraHeaders);
   }
 
   return headers;

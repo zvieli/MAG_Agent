@@ -4,6 +4,7 @@ import { DebugLogger } from '../domain/debugLogger';
 import { displayName, looksTechnicalId } from '../domain/displayNames';
 import { IGraphService } from './IAppServices';
 import { apiUrl, authHeaders, readJson } from './http';
+import { TokenService } from './TokenService';
 
 const graphTtlMs = 30 * 60 * 1000;
 
@@ -117,11 +118,13 @@ const normalizedGraph = (graph: GraphQueryResult, logger?: DebugLogger): GraphQu
 export class GraphService implements IGraphService {
   private readonly apiBaseUrl: string;
   private readonly functionKey: string;
+  private readonly tokenService?: TokenService;
   private readonly logger?: DebugLogger;
 
-  public constructor(apiBaseUrl: string, functionKey: string, logger?: DebugLogger) {
+  public constructor(apiBaseUrl: string, functionKey: string, tokenService?: TokenService, logger?: DebugLogger) {
     this.apiBaseUrl = apiBaseUrl;
     this.functionKey = functionKey;
+    this.tokenService = tokenService;
     this.logger = logger;
   }
 
@@ -148,9 +151,11 @@ export class GraphService implements IGraphService {
       return params.toString() ? `?${params.toString()}` : '';
     };
 
+    const token = await this.tokenService?.getAccessToken();
+
     const fetchGraph = async (docId: string, partitionKey: string): Promise<GraphQueryResult> =>
       fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/graph${graphSuffix(partitionKey)}`), {
-        headers: authHeaders(this.functionKey)
+        headers: authHeaders(this.functionKey, token)
       }).then(readJson<GraphQueryResult>);
 
     let result = await fetchGraph(query.docId, query.docId);
@@ -187,9 +192,11 @@ export class GraphService implements IGraphService {
       return params.toString() ? `?${params.toString()}` : '';
     };
 
+    const token = await this.tokenService?.getAccessToken();
+
     const fetchTimelineGraph = async (docId: string, partitionKey: string): Promise<GraphQueryResult> =>
       fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/timeline${timelineSuffix(partitionKey)}`), {
-        headers: authHeaders(this.functionKey)
+        headers: authHeaders(this.functionKey, token)
       }).then(readJson<GraphQueryResult>);
 
     let result = await fetchTimelineGraph(query.docId, query.docId);

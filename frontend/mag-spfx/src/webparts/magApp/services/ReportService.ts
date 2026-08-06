@@ -2,16 +2,19 @@ import { CommunitySummariesResult, ProtocolCompletenessResult, ReportResult } fr
 import { browserCache } from '../domain/browserCache';
 import { IReportService } from './IAppServices';
 import { apiUrl, authHeaders, readJson } from './http';
+import { TokenService } from './TokenService';
 
 const reportTtlMs = 30 * 60 * 1000;
 
 export class ReportService implements IReportService {
   private readonly apiBaseUrl: string;
   private readonly functionKey: string;
+  private readonly tokenService?: TokenService;
 
-  public constructor(apiBaseUrl: string, functionKey: string) {
+  public constructor(apiBaseUrl: string, functionKey: string, tokenService?: TokenService) {
     this.apiBaseUrl = apiBaseUrl;
     this.functionKey = functionKey;
+    this.tokenService = tokenService;
   }
 
   public async getReport(docId: string, options?: { forceRefresh?: boolean }): Promise<ReportResult> {
@@ -27,8 +30,9 @@ export class ReportService implements IReportService {
     }
 
     try {
+      const token = await this.tokenService?.getAccessToken();
       const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/report`), {
-        headers: authHeaders(this.functionKey)
+        headers: authHeaders(this.functionKey, token)
       }).then(readJson<ReportResult>);
       await browserCache.set(cacheKey, result, reportTtlMs);
       return { ...result, cache: { fromCache: false } };
@@ -57,8 +61,9 @@ export class ReportService implements IReportService {
     }
 
     try {
+      const token = await this.tokenService?.getAccessToken();
       const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/communities`), {
-        headers: authHeaders(this.functionKey)
+        headers: authHeaders(this.functionKey, token)
       }).then(readJson<CommunitySummariesResult>);
       await browserCache.set(cacheKey, result, reportTtlMs);
       return { ...result, cache: { fromCache: false } };
@@ -88,8 +93,9 @@ export class ReportService implements IReportService {
     }
 
     try {
+      const token = await this.tokenService?.getAccessToken();
       const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness`), {
-        headers: authHeaders(this.functionKey)
+        headers: authHeaders(this.functionKey, token)
       }).then(readJson<ProtocolCompletenessResult>);
       await browserCache.set(cacheKey, result, reportTtlMs);
       return { ...result, cache: { fromCache: false } };
@@ -106,11 +112,11 @@ export class ReportService implements IReportService {
     }
   }
 
-
   public async verifyProtocolCompletenessWithAgent(docId: string): Promise<string> {
+    const token = await this.tokenService?.getAccessToken();
     const response = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness/verify`), {
       method: 'POST',
-      headers: authHeaders(this.functionKey)
+      headers: authHeaders(this.functionKey, token)
     });
     if (!response.ok) {
       throw new Error(`Verification request failed: ${response.statusText}`);
@@ -121,11 +127,13 @@ export class ReportService implements IReportService {
   }
 
   public async checkVerificationStatus(statusUrl: string): Promise<{ runtimeStatus: string }> {
-    const response = await fetch(statusUrl);
+    const token = await this.tokenService?.getAccessToken();
+    const response = await fetch(statusUrl, {
+      headers: authHeaders(this.functionKey, token)
+    });
     if (!response.ok) {
       throw new Error(`Status query failed: ${response.statusText}`);
     }
     return response.json();
   }
 }
-

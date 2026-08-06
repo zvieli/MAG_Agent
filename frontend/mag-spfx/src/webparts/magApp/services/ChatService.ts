@@ -1,20 +1,23 @@
 import { ChatAnswer, ChatOperation, DurableStartResponse, DurableStatus } from '../domain/types';
-import { DebugLogger } from '../domain/debugLogger';
+import { DebugLogger, createDebugLogger } from '../domain/debugLogger';
 import { makeId, normalizeRuntimeStatus } from '../domain/guards';
 import { browserCache } from '../domain/browserCache';
 import { IChatService } from './IAppServices';
 import { apiUrl, authHeaders, readJson } from './http';
+import { TokenService } from './TokenService';
 
 export class ChatService implements IChatService {
   private readonly apiBaseUrl: string;
   private readonly functionKey: string;
+  private readonly tokenService?: TokenService;
   private readonly logger: DebugLogger;
   private readonly pendingCacheKeys: Record<string, string> = {};
 
-  public constructor(apiBaseUrl: string, functionKey: string, logger: DebugLogger) {
+  public constructor(apiBaseUrl: string, functionKey: string, tokenService?: TokenService, logger?: DebugLogger) {
     this.apiBaseUrl = apiBaseUrl;
     this.functionKey = functionKey;
-    this.logger = logger;
+    this.tokenService = tokenService;
+    this.logger = logger || createDebugLogger(false);
   }
 
   public async ask(docId: string, question: string, state?: any): Promise<ChatOperation> {
@@ -43,9 +46,10 @@ export class ChatService implements IChatService {
       questionPreview: question.slice(0, 120)
     });
 
+    const token = await this.tokenService?.getAccessToken();
     const start = await fetch(url, {
       method: 'POST',
-      headers: authHeaders(this.functionKey, {
+      headers: authHeaders(this.functionKey, token, {
         'Content-Type': 'application/json',
         'x-mag-trace-id': traceId
       }),
@@ -102,8 +106,9 @@ export class ChatService implements IChatService {
       statusUrl
     });
 
+    const token = await this.tokenService?.getAccessToken();
     const status = await fetch(statusUrl, {
-      headers: authHeaders(this.functionKey, {
+      headers: authHeaders(this.functionKey, token, {
         'x-mag-trace-id': pollTraceId
       })
     }).then((response) =>

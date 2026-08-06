@@ -89,7 +89,8 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
       enableDebugLogs: this.properties.enableDebugLogs === true,
       sharePointSiteUrl: this.properties.sharePointSiteUrl || currentWebUrl,
       sharePointFolderServerRelativeUrl:
-        this.properties.sharePointFolderServerRelativeUrl || `${cleanWebRelativeUrl}/Shared Documents`
+        this.properties.sharePointFolderServerRelativeUrl || `${cleanWebRelativeUrl}/Shared Documents`,
+      aadTokenProviderFactory: this.context.aadTokenProviderFactory
     };
 
     const element = React.createElement(MagApp, { config, spHttpClient: this.context.spHttpClient });

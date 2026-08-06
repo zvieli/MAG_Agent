@@ -1,19 +1,22 @@
 import { deriveDocId, makeId, normalizeRuntimeStatus } from '../domain/guards';
 import { DurableStartResponse, DurableStatus, PipelineOperation, PipelineOutput, PipelinePreflightResult } from '../domain/types';
-import { DebugLogger } from '../domain/debugLogger';
+import { DebugLogger, createDebugLogger } from '../domain/debugLogger';
 import { browserCache } from '../domain/browserCache';
 import { IPipelineService } from './IAppServices';
 import { HttpError, apiUrl, authHeaders, readJson } from './http';
+import { TokenService } from './TokenService';
 
 export class PipelineService implements IPipelineService {
   private readonly apiBaseUrl: string;
   private readonly functionKey: string;
+  private readonly tokenService?: TokenService;
   private readonly logger: DebugLogger;
 
-  public constructor(apiBaseUrl: string, functionKey: string, logger: DebugLogger) {
+  public constructor(apiBaseUrl: string, functionKey: string, tokenService?: TokenService, logger?: DebugLogger) {
     this.apiBaseUrl = apiBaseUrl;
     this.functionKey = functionKey;
-    this.logger = logger;
+    this.tokenService = tokenService;
+    this.logger = logger || createDebugLogger(false);
   }
 
   private pipelineError(status: DurableStatus<PipelineOutput>): string | undefined {
@@ -56,8 +59,9 @@ export class PipelineService implements IPipelineService {
     }
 
     try {
+      const token = await this.tokenService?.getAccessToken();
       const preflight = await fetch(preflightUrl, {
-        headers: authHeaders(this.functionKey, {
+        headers: authHeaders(this.functionKey, token, {
           'x-mag-trace-id': traceId
         })
       }).then((response) =>
@@ -103,6 +107,7 @@ export class PipelineService implements IPipelineService {
     url: string,
     file: File,
     functionKey: string,
+    token: string | undefined,
     traceId: string,
     startedAtMs: number,
     onProgress: ((operation: PipelineOperation) => void) | undefined
@@ -111,7 +116,7 @@ export class PipelineService implements IPipelineService {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', url);
 
-      const headers = authHeaders(functionKey, {
+      const headers = authHeaders(functionKey, token, {
         'Content-Disposition': `attachment; filename="${encodeURIComponent(file.name)}"`,
         'Content-Type': 'application/pdf',
         'x-mag-trace-id': traceId
@@ -253,7 +258,8 @@ export class PipelineService implements IPipelineService {
       onProgress
     );
 
-    const start = await this.uploadWithProgress(url, file, this.functionKey, traceId, startedAtMs, onProgress);
+    const token = await this.tokenService?.getAccessToken();
+    const start = await this.uploadWithProgress(url, file, this.functionKey, token, traceId, startedAtMs, onProgress);
 
     const duplicateStart = start as DurableStartResponse & PipelinePreflightResult;
     if (duplicateStart.status === 'duplicate' && duplicateStart.matched_doc_id) {
@@ -335,8 +341,9 @@ export class PipelineService implements IPipelineService {
       statusUrl: operation.statusUrl
     });
 
+    const token = await this.tokenService?.getAccessToken();
     const status = await fetch(operation.statusUrl, {
-      headers: authHeaders(this.functionKey, {
+      headers: authHeaders(this.functionKey, token, {
         'x-mag-trace-id': traceId
       })
     }).then((response) =>
