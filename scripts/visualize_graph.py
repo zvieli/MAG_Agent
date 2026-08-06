@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import sys
 from pathlib import Path
 
@@ -50,12 +51,12 @@ def generate_visualization():
         local_path.write_text(md_content, encoding="utf-8")
         print(f"✅ Local markdown visualization saved to: {local_path}")
         
-        # Save to brain conversation artifacts directory
-        artifact_dir = Path("/home/lior/projects/MAG_Agent/visuals")
-        if artifact_dir.exists():
-            artifact_path = artifact_dir / "agent_graph.md"
-            artifact_path.write_text(md_content, encoding="utf-8")
-            print(f"✅ Brain artifact markdown saved to: {artifact_path}")
+        # Save to visuals directory
+        artifact_dir = ROOT / "visuals"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+        artifact_path = artifact_dir / "agent_graph.md"
+        artifact_path.write_text(md_content, encoding="utf-8")
+        print(f"✅ Brain artifact markdown saved to: {artifact_path}")
             
     except Exception as e:
         print(f"❌ Failed to generate graph visualization: {e}")

@@ -6,6 +6,7 @@ import { isSuccessfulPipeline, isTerminalStatus } from '../domain/guards';
 import { errorText, pipelinePhaseLabel, runtimeStatusLabel, technicalValue } from '../domain/localization';
 import { PipelineOperation, SPFile } from '../domain/types';
 import { IPipelineService, ISharePointFileService } from '../services/IAppServices';
+import { normalizeFolderServerRelativeUrl } from '../services/SharePointFileService';
 
 const MAX_PDF_SIZE_BYTES = 50 * 1024 * 1024;
 
@@ -205,7 +206,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
         <div className={styles.sharePointHeader}>
           <div>
             <strong>קובצי PDF זמינים</strong>
-            <small className={styles.sharePointPath}>{sharePointFolderServerRelativeUrl}</small>
+            <small className={styles.sharePointPath}>{normalizeFolderServerRelativeUrl(sharePointFolderServerRelativeUrl)}</small>
           </div>
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
             <SearchBox

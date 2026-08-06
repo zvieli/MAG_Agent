@@ -9,6 +9,7 @@ config:
 graph TD;
 	__start__([__start__]):::first
 	hydrate(hydrate)
+	policy_validation(policy_validation)
 	process_hitl(process_hitl)
 	coordinator(coordinator)
 	doc_branch(doc_branch)
@@ -27,11 +28,14 @@ graph TD;
 	extraction -.-> halt_for_hitl;
 	extraction -.-> planner;
 	graph_branch --> synthesis;
-	hydrate -.-> coordinator;
+	hydrate -.-> policy_validation;
 	hydrate -.-> process_hitl;
 	planner -.-> coordinator;
 	planner -.-> finalizer;
-	process_hitl --> planner;
+	policy_validation -.-> __end__;
+	policy_validation -.-> coordinator;
+	process_hitl -.-> halt_for_hitl;
+	process_hitl -.-> planner;
 	synthesis --> extraction;
 	finalizer --> __end__;
 	halt_for_hitl --> __end__;

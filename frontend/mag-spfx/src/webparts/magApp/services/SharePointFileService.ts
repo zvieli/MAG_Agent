@@ -9,6 +9,36 @@ interface IFileItemResponse {
   Length?: string;
 }
 
+export const normalizeFolderServerRelativeUrl = (rawUrl: string): string => {
+  if (!rawUrl) return '';
+
+  let path = rawUrl.trim();
+
+  if (/^https?:\/\//i.test(path)) {
+    try {
+      path = new URL(path).pathname;
+    } catch {
+      // Keep as is if URL parsing fails
+    }
+  }
+
+  try {
+    path = decodeURIComponent(path);
+  } catch {
+    // Keep as is
+  }
+
+  // Strip SharePoint list view suffixes (/Forms/AllItems.aspx, /Forms/AllItems, /Forms/Flat.aspx, etc.)
+  path = path.replace(/\/Forms\/[^\/]+$/i, '');
+
+  if (!path.startsWith('/')) {
+    path = '/' + path;
+  }
+  path = path.replace(/\/+$/, '');
+
+  return path;
+};
+
 const encodeODataLiteral = (value: string): string =>
   encodeURIComponent(value.replace(/'/g, "''")).replace(/'/g, '%27');
 
@@ -25,23 +55,29 @@ export class SharePointFileService implements ISharePointFileService {
     return `${this.webAbsoluteUrl}/_api/${pathAndQuery}`;
   }
 
-  private async readJson<T>(response: SPHttpClientResponse): Promise<T> {
+  private async readJson<T>(response: SPHttpClientResponse, contextPath?: string): Promise<T> {
     if (!response.ok) {
       const body = await response.text().catch(() => '');
+      if (response.status === 403) {
+        throw new Error(
+          `אין הרשאת גישה לתיקיית SharePoint או שהנתיב אינו תקין (${contextPath || ''}). נסו להזין נתיב תיקייה ראשי ללא סיומת /Forms/AllItems.`
+        );
+      }
       throw new Error(`בקשת SharePoint נכשלה (${response.status}): ${body || response.statusText}`);
     }
     return response.json() as Promise<T>;
   }
 
   public async listFiles(folderServerRelativeUrl: string): Promise<SPFile[]> {
-    const encodedFolder = encodeODataLiteral(folderServerRelativeUrl);
+    const cleanFolder = normalizeFolderServerRelativeUrl(folderServerRelativeUrl);
+    const encodedFolder = encodeODataLiteral(cleanFolder);
     const url = this.restUrl(
       `web/GetFolderByServerRelativeUrl('${encodedFolder}')/Files?$select=Name,ServerRelativeUrl,TimeLastModified,Length`
     );
     const response = await this.spHttpClient.get(url, SPHttpClient.configurations.v1, {
       headers: { Accept: 'application/json;odata=nometadata' }
     });
-    const payload = await this.readJson<{ value: IFileItemResponse[] }>(response);
+    const payload = await this.readJson<{ value: IFileItemResponse[] }>(response, cleanFolder);
 
     return (payload.value || [])
       .filter((file) => file.Name.toLowerCase().endsWith('.pdf'))

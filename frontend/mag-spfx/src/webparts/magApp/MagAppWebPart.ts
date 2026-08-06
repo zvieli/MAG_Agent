@@ -57,6 +57,8 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
         apiBaseUrl = process.env.VITE_API_TARGET || 'http://localhost:7071';
       } else if (envApiTarget) {
         apiBaseUrl = envApiTarget;
+      } else {
+        apiBaseUrl = 'https://homkeyhakera-lagend-e7cafje6hyhfdyfk.westeurope-01.azurewebsites.net';
       }
     }
 
@@ -75,15 +77,19 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
       }
     }
 
+    const currentWebUrl = this.context.pageContext?.web?.absoluteUrl || 'https://tikshuv.sharepoint.com/sites/MAG_Agent';
+    const currentWebRelativeUrl = this.context.pageContext?.web?.serverRelativeUrl || '/sites/MAG_Agent';
+    const cleanWebRelativeUrl = currentWebRelativeUrl.endsWith('/') ? currentWebRelativeUrl.slice(0, -1) : currentWebRelativeUrl;
+
     const config: MagAppConfig = {
       apiBaseUrl,
       functionKey,
       useMockData,
       pollIntervalMs,
       enableDebugLogs: this.properties.enableDebugLogs === true,
-      sharePointSiteUrl: this.properties.sharePointSiteUrl || 'https://tikshuv.sharepoint.com/sites/MAG_Agent',
+      sharePointSiteUrl: this.properties.sharePointSiteUrl || currentWebUrl,
       sharePointFolderServerRelativeUrl:
-        this.properties.sharePointFolderServerRelativeUrl || '/sites/MAG_Agent/Shared Documents/data'
+        this.properties.sharePointFolderServerRelativeUrl || `${cleanWebRelativeUrl}/Shared Documents`
     };
 
     const element = React.createElement(MagApp, { config, spHttpClient: this.context.spHttpClient });

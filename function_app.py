@@ -42,7 +42,7 @@ def _batched(items: List[str], batch_size: int) -> List[List[str]]:
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
-    "Access-Control-Allow-Headers": "x-mag-trace-id, x-functions-key, content-disposition, content-type, authorization, accept, origin, x-requested-with, *",
+    "Access-Control-Allow-Headers": "*",
     "Access-Control-Max-Age": "86400",
 }
 
@@ -53,6 +53,12 @@ def _get_cors_headers_for_req(req: func.HttpRequest | None = None) -> Dict[str, 
         origin = req.headers.get("origin") or req.headers.get("Origin")
         if origin:
             headers["Access-Control-Allow-Origin"] = origin
+        req_headers = (
+            req.headers.get("access-control-request-headers")
+            or req.headers.get("Access-Control-Request-Headers")
+        )
+        if req_headers:
+            headers["Access-Control-Allow-Headers"] = req_headers
     return headers
 
 
@@ -1142,6 +1148,7 @@ async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpRespon
                 "warning": f"Preflight check error: {exc}",
             },
             status_code=200,
+            req=req,
         )
 
 
