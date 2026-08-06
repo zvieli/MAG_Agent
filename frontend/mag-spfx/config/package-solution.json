@@ -9,8 +9,8 @@
     "isDomainIsolated": false,
     "webApiPermissionRequests": [
       {
-        "resource": "MAG-Agent-Backend-API",
-        "scope": "access_as_user"
+        "resource": "026e9069-414c-4df4-8513-bdeb9ff301d2",
+        "scope": "user_impersonation"
       }
     ],
     "features": [

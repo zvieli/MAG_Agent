@@ -21,6 +21,7 @@ export interface IMagAppWebPartProps {
   enableDebugLogs: boolean;
   sharePointSiteUrl: string;
   sharePointFolderServerRelativeUrl: string;
+  backendAppIdUri?: string;
 }
 
 export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartProps> {
@@ -30,6 +31,7 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
     let envFunctionKey: string | undefined = undefined;
     let envUseMockData: string | undefined = undefined;
     let envPollIntervalMs: string | undefined = undefined;
+    let envBackendAppIdUri: string | undefined = undefined;
 
     try {
       isLocalDocker = process.env.VITE_USE_LOCAL_DOCKER === 'true';
@@ -49,6 +51,10 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
 
     try {
       envPollIntervalMs = process.env.VITE_POLL_INTERVAL_MS;
+    } catch (e) { /* process is not defined */ }
+
+    try {
+      envBackendAppIdUri = process.env.VITE_BACKEND_APP_ID_URI || process.env.AZURE_Application_ID_URI;
     } catch (e) { /* process is not defined */ }
 
     let apiBaseUrl = this.properties.apiBaseUrl || '';
@@ -90,6 +96,7 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
       sharePointSiteUrl: this.properties.sharePointSiteUrl || currentWebUrl,
       sharePointFolderServerRelativeUrl:
         this.properties.sharePointFolderServerRelativeUrl || `${cleanWebRelativeUrl}/Shared Documents`,
+      backendAppIdUri: this.properties.backendAppIdUri || envBackendAppIdUri,
       aadTokenProviderFactory: this.context.aadTokenProviderFactory
     };
 
@@ -123,6 +130,10 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
                 PropertyPaneTextField('functionKey', {
                   label: strings.FunctionKeyFieldLabel,
                   placeholder: 'הדבק מפתח בדיקה'
+                }),
+                PropertyPaneTextField('backendAppIdUri', {
+                  label: 'Entra ID Backend App ID URI',
+                  placeholder: 'api://<backend-app-id>'
                 }),
                 PropertyPaneToggle('useMockData', {
                   label: strings.UseMockDataFieldLabel,

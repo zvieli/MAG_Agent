@@ -30,7 +30,7 @@ def validate_bearer_token(req: func.HttpRequest) -> Optional[Dict[str, Any]]:
     if not require_auth:
         return {"sub": "dev-user", "name": "Local Development"}
 
-    tenant_id = os.getenv("ENTRA_TENANT_ID")
+    tenant_id = os.getenv("ENTRA_TENANT_ID") or os.getenv("AZURE_Tenant_ID") or os.getenv("AZURE_TENANT_ID")
     client_id = os.getenv("ENTRA_BACKEND_CLIENT_ID") or os.getenv("AZURE_CLIENT_ID")
 
     if not tenant_id or not client_id:
