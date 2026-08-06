@@ -20,7 +20,7 @@ fi
 
 APP_URL="${AZURE_FUNCTION_APP_URL:-}"
 AUTH_KEY="${AZURE_FUNCTION_APP_KEY:-}"
-PDF_PATH="${PDF_PATH:-data/files_03.01.2021_short_2pages.pdf}"
+PDF_PATH="${PDF_PATH:-data/20260125015510 יהודה-26-1128 חומר חקירה מושחר.pdf}"
 TRACE_ID="${TRACE_ID:-pipeline-cloud-$(date +%s)-${RANDOM}}"
 ALLOW_ANONYMOUS="${ALLOW_ANONYMOUS_FUNCTIONS:-false}"
 
