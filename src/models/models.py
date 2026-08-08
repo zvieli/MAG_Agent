@@ -84,9 +84,41 @@ _CACHE = {
     "ENTITY_TYPES": None,
     "CONFIDENCE_LABELS": None,
     "CONFIDENCE_ALIASES": None,
-    "ALLOWED_CONFIDENCE_LABELS": None
+    "ALLOWED_CONFIDENCE_LABELS": None,
+    "HEBREW_TYPE_MAP": None,
 }
 _LOCK = threading.RLock()
+
+def _build_hebrew_type_map() -> dict[str, str]:
+    type_map: dict[str, str] = {}
+    try:
+        config = _get_cached("SCHEMA_CONFIG")
+        if config:
+            display_labels = getattr(config, "entity_type_display_labels", {}) or {}
+            for et_key, label in display_labels.items():
+                if label:
+                    type_map[et_key] = label
+
+            legal_map = getattr(config, "legal_role_map", {}) or {}
+            for role_key, terms in legal_map.items():
+                if terms and isinstance(terms, (list, tuple)) and len(terms) > 0:
+                    type_map[role_key] = terms[0]
+                    type_map[role_key.upper()] = terms[0]
+
+            entity_types = getattr(config, "entity_types", {}) or {}
+            keys = entity_types.keys() if isinstance(entity_types, dict) else entity_types
+            for et in keys:
+                if et not in type_map and et.upper() not in type_map:
+                    type_map.setdefault(et, et)
+    except Exception as e:
+        logging.warning(f"[MODELS] Failed building dynamic HEBREW_TYPE_MAP: {e}")
+
+    if "Accomplice" in type_map and "ACCOMPLICE" not in type_map:
+        type_map["ACCOMPLICE"] = type_map["Accomplice"]
+    elif "ACCOMPLICE" in type_map and "Accomplice" not in type_map:
+        type_map["Accomplice"] = type_map["ACCOMPLICE"]
+
+    return type_map
 
 def _get_cached(key):
     global _CACHE
@@ -114,26 +146,22 @@ def _get_cached(key):
                 elif key == "CONFIDENCE_LABELS":
                     _CACHE["CONFIDENCE_LABELS"] = _get_cached("SCHEMA_CONFIG").confidence_levels or {}
                 elif key == "CONFIDENCE_ALIASES":
+                    config = _get_cached("SCHEMA_CONFIG")
+                    conf_aliases = getattr(config, "confidence_aliases", {}) or {}
+                    aliases = dict(conf_aliases)
                     labels = _get_cached("CONFIDENCE_LABELS")
-                    aliases = {
-                        "EXTRACTED": "EXTRACTED",
-                        "DIRECT": "EXTRACTED",
-                        "INFERRED": "INFERRED",
-                        "AMBIGUOUS": "AMBIGUOUS",
-                        "HEARSAY": "HEARSAY",
-                        "RAIA_YESHIRA": "EXTRACTED",
-                        "NISTI": "INFERRED",
-                        "AMBUIGUOUS": "AMBIGUOUS",
-                    }
-                    for k in labels.keys():
-                        if k not in aliases:
-                            aliases[k] = k
+                    if labels:
+                        for k in labels.keys():
+                            if k not in aliases:
+                                aliases[k] = k
                     _CACHE["CONFIDENCE_ALIASES"] = aliases
                 elif key == "ALLOWED_CONFIDENCE_LABELS":
                     labels = _get_cached("CONFIDENCE_LABELS")
-                    allowed = set(labels.keys())
+                    allowed = set(labels.keys()) if labels else set()
                     allowed.update(["EXTRACTED", "DIRECT"])
                     _CACHE["ALLOWED_CONFIDENCE_LABELS"] = allowed
+                elif key == "HEBREW_TYPE_MAP":
+                    _CACHE["HEBREW_TYPE_MAP"] = _build_hebrew_type_map()
     return _CACHE[key]
 
 # Magic __getattr__ for module-level lazy constants
@@ -142,25 +170,26 @@ def __getattr__(name):
         return _get_cached(name)
     raise AttributeError(f"module {__name__} has no attribute {name}")
 
-# Static mappings that don't depend on external config
-HEBREW_TYPE_MAP = {
-    "SUSPECT": "חשוד",
-    "WITNESS": "עד",
-    "ACCOMPLICE": "עד מדינה",
-    "ORGANIZATION": "ארגון",
-    "DOCUMENT": "מסמך",
-    "LAW": "חוק",
-    "EXHIBIT": "מוצג",
-    "EVENT": "אירוע",
-    "OFFENSE": "עבירה",
-    "PERSON": "אדם"
-}
-
 # Functions for runtime logic
 def normalize_relation_label(relation: Any) -> str:
     raw = sanitize_value(relation)
     if not raw:
         return ""
+
+    config = _get_cached("SCHEMA_CONFIG")
+    relation_mappings = getattr(config, "relation_mappings", {}) or {}
+    if relation_mappings:
+        if raw in relation_mappings:
+            raw = relation_mappings[raw]
+        elif raw.upper() in relation_mappings:
+            raw = relation_mappings[raw.upper()]
+        else:
+            compact = raw.replace(" ", "_")
+            if compact in relation_mappings:
+                raw = relation_mappings[compact]
+            elif compact.upper() in relation_mappings:
+                raw = relation_mappings[compact.upper()]
+
     hebrew_labels = _get_cached("HEBREW_RELATION_LABELS")
     if raw in hebrew_labels:
         return raw
@@ -171,14 +200,17 @@ def normalize_relation_label(relation: Any) -> str:
     return aliases.get(raw.upper(), "OTHER_RELATION")
 
 def normalize_confidence_label(label: Any, score: float | None = None) -> Tuple[str, float]:
-    raw = str(label or "EXTRACTED").upper().strip()
+    from src.utils.model_helpers import normalize_confidence_value
     aliases = _get_cached("CONFIDENCE_ALIASES")
-    final_label = aliases.get(raw, "EXTRACTED")
-    
-    if score is None:
-        labels = _get_cached("CONFIDENCE_LABELS")
-        score = labels.get(final_label, 0.7)
-    return final_label, float(score)
+    config = _get_cached("SCHEMA_CONFIG")
+    confidence_scores = getattr(config, "confidence_level_scores", {}) or {}
+    return normalize_confidence_value(
+        confidence=label,
+        confidence_score=score,
+        confidence_aliases=aliases,
+        default_label="DIRECT",
+        confidence_scores=confidence_scores,
+    )
 
 # Aliases for graph_manager.py compatibility
 _normalize_confidence = normalize_confidence_label
@@ -228,7 +260,7 @@ class Edge(BaseModel):
     target: str
     relation: str
     description: str = ""
-    confidence: str = "EXTRACTED"
+    confidence: str = "DIRECT"
     confidence_score: float | None = None
     source_file: str = "unknown"
     source_location: str = ""

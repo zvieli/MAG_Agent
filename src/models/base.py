@@ -179,6 +179,11 @@ class SchemaConfigModel(BaseModel):
     date_types: List[str] = Field(default_factory=list)
 
     confidence_levels: Dict[str, str] = Field(default_factory=dict)
+    entity_type_display_labels: Dict[str, str] = Field(default_factory=dict)
+    confidence_aliases: Dict[str, str] = Field(default_factory=dict)
+    confidence_level_scores: Dict[str, float] = Field(default_factory=dict)
+    confidence_ranks: Dict[str, int] = Field(default_factory=dict)
+    confidence_display_labels: Dict[str, str] = Field(default_factory=dict)
     relation_types: Dict[str, str] = Field(default_factory=dict)
     relation_mappings: Dict[str, str] = Field(default_factory=dict)
     blocked_relation_labels: List[str] = Field(default_factory=list)
@@ -193,7 +198,7 @@ class SchemaConfigModel(BaseModel):
     representative_patterns: List[str] = Field(
         default_factory=lambda: [r"^(?:נציג|דובר|מטעם|עורך דין מטעם|עורכת דין מטעם)"]
     )
-    default_confidence_label: str = "EXTRACTED"
+    default_confidence_label: str = "DIRECT"
     special_thresholds: Dict[str, float] = Field(
         default_factory=lambda: {"causality": 0.55}
     )

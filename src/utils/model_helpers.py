@@ -70,7 +70,8 @@ def normalize_confidence_value(
     confidence: str | None,
     confidence_score: float | None,
     confidence_aliases: dict[str, str],
-    default_label: str = "EXTRACTED",
+    default_label: str = "DIRECT",
+    confidence_scores: dict[str, float] | None = None,
 ) -> Tuple[str, float]:
     """Normalizes confidence tokens and ensures a valid numeric score.
 
@@ -82,6 +83,7 @@ def normalize_confidence_value(
         confidence_score: The numeric score (0.0 to 1.0).
         confidence_aliases: A dictionary mapping raw tokens to canonical ones.
         default_label: The fallback label if no match is found.
+        confidence_scores: Optional dictionary mapping canonical labels to default numeric scores.
 
     Returns:
         A tuple of (canonical_label, numeric_score).
@@ -91,16 +93,21 @@ def normalize_confidence_value(
         raw, confidence_aliases.get(raw.upper(), default_label)
     )
 
-    if normalized in ["EXTRACTED", "DIRECT"]:
-        default_score = 1.0
-    elif normalized == "INFERRED":
-        default_score = 0.8
-    elif normalized == "AMBIGUOUS":
-        default_score = 0.2
-    else:
-        default_score = 1.0
-
     if confidence_score is None:
+        scores = confidence_scores
+        if scores is None:
+            try:
+                from src.models.models import _get_cached
+                config = _get_cached("SCHEMA_CONFIG")
+                scores = getattr(config, "confidence_level_scores", {}) or {}
+            except Exception:
+                scores = {}
+
+        val = scores.get(normalized) if scores else None
+        if isinstance(val, (int, float)):
+            default_score = float(val)
+        else:
+            default_score = 1.0
         return normalized, default_score
 
     return normalized, float(confidence_score)

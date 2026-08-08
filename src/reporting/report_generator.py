@@ -406,12 +406,9 @@ def analyze_graph_health(graph: nx.Graph) -> dict[str, Any]:
     )
     description_coverage = description_count / node_count if node_count else 0.0
     # Reporting-level confidence mapping (Display only)
-    CONFIDENCE_DISPLAY_MAP = {
-        "DIRECT": "ראיה ישירה",
-        "INFERRED": "נסיבתי",
-        "AMBIGUOUS": "עמום",
-        "HEARSAY": "מפי השמועה",
-    }
+    CONFIDENCE_DISPLAY_MAP = getattr(
+        SCHEMA_CONFIG, "confidence_display_labels", {}
+    ) or {}
 
     confidence_counts = Counter(
         (
@@ -423,9 +420,9 @@ def analyze_graph_health(graph: nx.Graph) -> dict[str, Any]:
     )
 
     # Map to Hebrew display labels while preserving counts
-    display_confidence_counts = Counter(
-        {CONFIDENCE_DISPLAY_MAP.get(k, k): v for k, v in confidence_counts.items()}
-    )
+    display_confidence_counts: Counter[str] = Counter()
+    for k, v in confidence_counts.items():
+        display_confidence_counts[CONFIDENCE_DISPLAY_MAP.get(k, k)] += v
 
     confidence_total = sum(confidence_counts.values())
     extracted_ratio = (

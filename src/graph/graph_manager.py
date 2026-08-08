@@ -594,14 +594,18 @@ def _dedupe_extracted_edges(
     }
 
     def confidence_rank(confidence: str) -> int:
-        return {
-            "ראיה_ישירה": 3,
-            "נסיבתי": 2,
-            "עמום": 1,
-            "EXTRACTED": 3,
-            "INFERRED": 2,
-            "AMBIGUOUS": 1,
-        }.get(str(confidence).upper(), 0)
+        ranks = getattr(schema_config, "confidence_ranks", {}) or {}
+        conf_str = str(confidence or "").strip()
+        if conf_str in ranks:
+            val = ranks[conf_str]
+        elif conf_str.upper() in ranks:
+            val = ranks[conf_str.upper()]
+        else:
+            val = 0
+        try:
+            return int(val)
+        except (TypeError, ValueError):
+            return 0
 
     for edge in edges:
         source = str(edge.get("source", "")).strip()

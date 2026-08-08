@@ -209,7 +209,55 @@
   "representative_patterns": [
     "^(?:נציג|דובר|מטעם|עורך דין מטעם|עורכת דין מטעם)"
   ],
-  "default_confidence_label": "EXTRACTED",
+  "default_confidence_label": "DIRECT",
+  "entity_type_display_labels": {
+    "SUSPECT": "חשוד",
+    "WITNESS": "עד",
+    "Accomplice": "עד מדינה",
+    "LEGAL_REP": "עורך דין",
+    "INVESTIGATOR": "חוקר",
+    "ORGANIZATION": "ארגון",
+    "EXHIBIT": "מוצג",
+    "DOCUMENT": "מסמך",
+    "OFFENSE": "עבירה",
+    "EVENT": "אירוע",
+    "LAW": "חוק",
+    "PERSON": "אדם"
+  },
+  "confidence_aliases": {
+    "DIRECT": "DIRECT",
+    "EXTRACTED": "DIRECT",
+    "RAIA_YESHIRA": "DIRECT",
+    "HEARSAY": "HEARSAY",
+    "INFERRED": "INFERRED",
+    "AMBIGUOUS": "AMBIGUOUS",
+    "AMBUIGUOUS": "AMBIGUOUS",
+    "NISTI": "INFERRED"
+  },
+  "confidence_level_scores": {
+    "DIRECT": 1.0,
+    "EXTRACTED": 1.0,
+    "HEARSAY": 0.5,
+    "INFERRED": 0.8,
+    "AMBIGUOUS": 0.2
+  },
+  "confidence_ranks": {
+    "DIRECT": 3,
+    "EXTRACTED": 3,
+    "HEARSAY": 2,
+    "INFERRED": 2,
+    "AMBIGUOUS": 1,
+    "ראיה_ישירה": 3,
+    "נסיבתי": 2,
+    "עמום": 1
+  },
+  "confidence_display_labels": {
+    "DIRECT": "ראיה ישירה",
+    "EXTRACTED": "ראיה ישירה",
+    "HEARSAY": "מפי השמועה",
+    "INFERRED": "נסיבתי",
+    "AMBIGUOUS": "עמום"
+  },
   "special_thresholds": {
     "causality": 0.55
   },

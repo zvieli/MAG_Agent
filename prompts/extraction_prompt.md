@@ -38,7 +38,7 @@ Map every person's role/description in the text to the corresponding English can
       "source": "id1",
       "target": "id2",
       "relation": "Allowed relation key from {ALLOWED_RELATION_TYPES}",
-      "confidence": "EXTRACTED | INFERRED | AMBIGUOUS",
+      "confidence": "{ALLOWED_CONFIDENCE_LEVELS}",
       "confidence_score": 0.0-1.0,
       "description": "A brief, highly specific sentence detailing the substance or context of this relationship.",
       "forensic_summary": "2-3 detailed sentences in Hebrew."
