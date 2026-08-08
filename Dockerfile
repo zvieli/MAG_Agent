@@ -16,6 +16,8 @@ RUN uv pip install --system --no-cache -r /requirements.txt && \
 
 COPY . /home/site/wwwroot/
 
+RUN python3 scripts/smoke_structured_outputs.py
+
 # Rename local.settings.json to avoid any conflicts with environment variables
 RUN if [ -f /home/site/wwwroot/local.settings.json ]; then mv /home/site/wwwroot/local.settings.json /home/site/wwwroot/local.settings.json.bak; fi
 

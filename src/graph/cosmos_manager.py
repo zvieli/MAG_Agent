@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import logging
 from typing import Any, Dict, List, Optional
+from urllib.parse import urlparse
 from gremlin_python.driver import client, serializer
 from src.utils.config import settings
 from src.tools.contracts import GraphQueryInput, GraphQueryResult, ToolExecutionError
@@ -12,6 +14,39 @@ from src.tools.contracts import GraphQueryInput, GraphQueryResult, ToolExecution
 MAX_COMPACT_PREVIEW_ITEMS = 3
 MAX_COMPACT_PREVIEW_CHARS = 1000
 MAX_COMPACT_TEXT_CHARS = 2000
+
+DUPLICATE_MATCH_FIELDS = ("pk", "partitionKey", "source_file")
+
+
+def cosmos_data_source_identity(endpoint: str, database: str, graph: str) -> Dict[str, str]:
+    """Return a stable, credential-free identity for a Cosmos graph target."""
+    normalized_endpoint = (endpoint or "").strip()
+    parsed = urlparse(
+        normalized_endpoint
+        if "://" in normalized_endpoint
+        else f"wss://{normalized_endpoint}"
+    )
+    host = (parsed.hostname or normalized_endpoint).lower().rstrip("/")
+    canonical = f"{host}|{database}|{graph}"
+    fingerprint = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:16]
+    return {
+        "data_source_id": f"cosmos-{fingerprint}",
+        "host": host,
+        "database": str(database),
+        "graph": str(graph),
+    }
+
+
+def duplicate_lookup_query(property_name: str) -> str:
+    """Build the allowlisted lookup used by duplicate preflight and diagnostics."""
+    if property_name not in DUPLICATE_MATCH_FIELDS:
+        raise ValueError(f"Unsupported duplicate match property: {property_name}")
+    return (
+        f"g.V().has('{property_name}', requested_doc_id).limit(1)"
+        ".project('id', 'label', 'properties', 'matched_value')"
+        ".by(id()).by(label()).by(valueMap(true))"
+        f".by(values('{property_name}'))"
+    )
 
 
 class CosmosGremlinManager:
@@ -47,9 +82,12 @@ class CosmosGremlinManager:
         self._client = None
         self._loop = None
 
+    @property
+    def data_source_identity(self) -> Dict[str, str]:
+        return cosmos_data_source_identity(self.endpoint, self.database, self.graph)
+
     def _get_client(self) -> client.Client:
         if self._client is None:
-            from urllib.parse import urlparse
             endpoint = self.endpoint.strip()
             if "://" not in endpoint:
                 url_to_parse = f"wss://{endpoint}"
@@ -620,6 +658,17 @@ class CosmosGremlinManager:
         Synchronizes a full graph structure to Cosmos DB with detailed progress observability.
         Filters out any nodes and edges belonging to connected components with a size less than 3.
         """
+        doc_id = str(
+            graph_data.get("metadata", {}).get("doc_id")
+            or graph_data.get("metadata", {}).get("source_file")
+            or graph_data.get("doc_id")
+            or ""
+        ).strip()
+        if not doc_id or doc_id == "unknown":
+            raise ValueError(
+                "Graph metadata doc_id is required for filename-based Cosmos partitioning"
+            )
+
         raw_nodes = graph_data.get("nodes", [])
         raw_edges = graph_data.get("edges", []) or graph_data.get("links", [])
         
@@ -657,18 +706,16 @@ class CosmosGremlinManager:
         # 3. Keep only nodes belonging to components of size >= 3
         valid_nodes_set = {n for comp in components if len(comp) >= 3 for n in comp}
         
-        nodes = [n for n in raw_nodes if str(n.get("id")) in valid_nodes_set]
+        nodes = [
+            {**n, "pk": doc_id, "source_file": doc_id}
+            for n in raw_nodes
+            if str(n.get("id")) in valid_nodes_set
+        ]
         edges = [
-            e for e in raw_edges
+            {**e, "pk": doc_id, "source_file": doc_id}
+            for e in raw_edges
             if str(e.get("source")) in valid_nodes_set and str(e.get("target")) in valid_nodes_set
         ]
-        
-        doc_id = (
-            graph_data.get("metadata", {}).get("doc_id")
-            or graph_data.get("metadata", {}).get("source_file")
-            or graph_data.get("doc_id")
-            or "unknown"
-        )
 
         logging.info(
             f"[COSMOS] [GRAPH_SYNC] [START] | Metadata: DocID={doc_id}, RawNodeCount={len(raw_nodes)}, RawEdgeCount={len(raw_edges)}, FilteredNodeCount={len(nodes)}, FilteredEdgeCount={len(edges)} | Message: Connected component size filtered. Beginning graph synchronization"
@@ -793,4 +840,3 @@ class CosmosGremlinManager:
                 retryable=True,
                 details={"duration_ms": duration_ms},
             )
-

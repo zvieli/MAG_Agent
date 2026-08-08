@@ -1,7 +1,12 @@
 import unittest
 from unittest.mock import Mock, patch
 import azure.functions as func
-from function_app import _get_cors_headers_for_req, CORS_HEADERS, _handle_options_request, ping, health_check
+from function_app import (
+    _get_cors_headers_for_req,
+    _handle_options_request,
+    _resolve_upload_filename,
+    ping,
+)
 
 
 class TestCorsPreflight(unittest.TestCase):
@@ -9,8 +14,38 @@ class TestCorsPreflight(unittest.TestCase):
         headers = _get_cors_headers_for_req(None)
         self.assertEqual(
             headers["Access-Control-Allow-Headers"],
-            "Authorization, Content-Type, x-functions-key, *",
+            "Authorization, Content-Type, Content-Disposition, x-functions-key, x-mag-file-name, *",
         )
+
+    def test_upload_filename_uses_matching_redundant_metadata(self):
+        req = Mock()
+        req.params = {"filename": "sample_page_1.pdf"}
+        req.headers = {
+            "x-mag-file-name": "sample_page_1.pdf",
+            "Content-Disposition": 'attachment; filename="sample_page_1.pdf"',
+        }
+
+        self.assertEqual(_resolve_upload_filename(req), "sample_page_1.pdf")
+
+    def test_upload_filename_supports_encoded_unicode(self):
+        req = Mock()
+        req.params = {"filename": "%D7%AA%D7%99%D7%A7%20%D7%90.pdf"}
+        req.headers = {}
+
+        self.assertEqual(_resolve_upload_filename(req), "תיק א.pdf")
+
+    def test_upload_filename_rejects_missing_or_conflicting_metadata(self):
+        missing = Mock()
+        missing.params = {}
+        missing.headers = {}
+        with self.assertRaisesRegex(ValueError, "Missing PDF filename"):
+            _resolve_upload_filename(missing)
+
+        conflicting = Mock()
+        conflicting.params = {"filename": "first.pdf"}
+        conflicting.headers = {"x-mag-file-name": "second.pdf"}
+        with self.assertRaisesRegex(ValueError, "Conflicting PDF filename metadata"):
+            _resolve_upload_filename(conflicting)
 
     def test_cors_headers_echoes_request_headers_includes_authorization(self):
         req = Mock()

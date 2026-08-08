@@ -313,6 +313,20 @@ class DefaultReporter:
                 insight_md += protocol_completeness_to_markdown(protocol_completeness)
                 insight_md += "\n"
 
+            metadata = graph_data.get("metadata") or {}
+            if metadata.get("is_partial"):
+                blocked_ranges = metadata.get("blocked_page_ranges") or []
+                coverage = float(metadata.get("coverage_ratio") or 0.0) * 100
+                warning = (
+                    "# ⚠️ Incomplete source coverage\n\n"
+                    f"This report excludes provider-blocked source page ranges: {blocked_ranges}. "
+                    f"Token-weighted coverage is {coverage:.1f}%. Findings and apparent absences "
+                    "apply only to the processed ranges and must not be interpreted as statements "
+                    "about the entire document. "
+                    f"Review trace ID: {metadata.get('trace_id') or 'unavailable'}.\n\n"
+                )
+                return warning + md_report + insight_md
+
             return md_report + insight_md
 
         report_content = await asyncio.to_thread(_compute)

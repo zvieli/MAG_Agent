@@ -53,6 +53,33 @@ export const PageShell: React.FC<PageShellProps> = ({ activePage, session, onNav
         );
       })}
     </nav>
-    <main className={styles.main}>{children}</main>
+    <main className={styles.main}>
+      {(session.pipeline?.output?.review_required || session.pipeline?.customStatus?.review_required) && (
+        <div className={styles.partialCoverageWarning} role="status" aria-live="polite">
+          <strong>
+            {session.pipeline?.output?.status === 'content_blocked'
+              ? '⚠️ כל התוכן השמיש נחסם ולא נוצר גרף.'
+              : '⚠️ הגרף חלקי ונדרשת בדיקה.'}
+          </strong>{' '}
+          טווחי המקור שנחסמו הושמטו: {' '}
+          {JSON.stringify(
+            session.pipeline?.output?.blocked_page_ranges ||
+              session.pipeline?.customStatus?.blocked_page_ranges ||
+              []
+          )}. כיסוי משוקלל לפי טוקנים: {' '}
+          {Math.round(
+            100 *
+              (session.pipeline?.output?.coverage_ratio ??
+                session.pipeline?.customStatus?.coverage_ratio ??
+                0)
+          )}%.
+          אין לפרש ממצא חסר כהיעדר מהמסמך המלא. מזהה מעקב: {' '}
+          <span className={styles.ltrValue}>
+            {session.pipeline?.output?.trace_id || session.pipeline?.traceId || 'לא זמין'}
+          </span>
+        </div>
+      )}
+      {children}
+    </main>
   </section>
 );

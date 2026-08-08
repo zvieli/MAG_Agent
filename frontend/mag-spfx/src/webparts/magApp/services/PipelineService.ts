@@ -1,7 +1,6 @@
 import { deriveDocId, makeId, normalizeRuntimeStatus } from '../domain/guards';
 import { DurableStartResponse, DurableStatus, PipelineOperation, PipelineOutput, PipelinePreflightResult } from '../domain/types';
 import { DebugLogger, createDebugLogger } from '../domain/debugLogger';
-import { browserCache } from '../domain/browserCache';
 import { IPipelineService } from './IAppServices';
 import { HttpError, apiUrl, authHeaders, readJson } from './http';
 import { TokenService } from './TokenService';
@@ -49,19 +48,15 @@ export class PipelineService implements IPipelineService {
 
   private async runDuplicatePreflight(
     preflightUrl: string,
-    preflightCacheKey: string,
     traceId: string,
     fileName: string
   ): Promise<PipelinePreflightResult> {
-    const cachedPreflight = await browserCache.get<PipelinePreflightResult>(preflightCacheKey);
-    if (cachedPreflight) {
-      return cachedPreflight.value;
-    }
-
     try {
       const token = await this.tokenService?.getAccessToken();
       const preflight = await fetch(preflightUrl, {
+        cache: 'no-store',
         headers: authHeaders(this.functionKey, token, {
+          'Cache-Control': 'no-cache',
           'x-mag-trace-id': traceId
         })
       }).then((response) =>
@@ -73,10 +68,6 @@ export class PipelineService implements IPipelineService {
           url: preflightUrl
         })
       );
-
-      if (preflight.status !== 'error') {
-        await browserCache.set(preflightCacheKey, preflight, 5 * 60 * 1000);
-      }
 
       return preflight;
     } catch (error) {
@@ -95,7 +86,10 @@ export class PipelineService implements IPipelineService {
           matched_doc_id: null,
           matched_by: 'none',
           sample_node: null,
-          cache_hit: false
+          cache_hit: false,
+          cache_source: 'none',
+          live_query: false,
+          data_source_id: null
         };
       }
 
@@ -119,6 +113,7 @@ export class PipelineService implements IPipelineService {
       const headers = authHeaders(functionKey, token, {
         'Content-Disposition': `attachment; filename="${encodeURIComponent(file.name)}"`,
         'Content-Type': 'application/pdf',
+        'x-mag-file-name': encodeURIComponent(file.name),
         'x-mag-trace-id': traceId
       });
 
@@ -165,7 +160,7 @@ export class PipelineService implements IPipelineService {
     const traceId = this.logger.createTraceId('pipeline');
     const startedAtMs = Date.now();
     const preflightUrl = apiUrl(this.apiBaseUrl, `/api/pipeline-preflight?filename=${encodeURIComponent(file.name)}`);
-    const url = apiUrl(this.apiBaseUrl, '/api/pipelines');
+    const url = apiUrl(this.apiBaseUrl, `/api/pipelines?filename=${encodeURIComponent(file.name)}`);
 
     this.emitProgress(
       {
@@ -188,8 +183,7 @@ export class PipelineService implements IPipelineService {
       fileName: file.name
     });
 
-    const preflightCacheKey = `preflight:${file.name}`;
-    const preflight = await this.runDuplicatePreflight(preflightUrl, preflightCacheKey, traceId, file.name);
+    const preflight = await this.runDuplicatePreflight(preflightUrl, traceId, file.name);
 
     this.logger.group('Pipeline duplicate preflight response', {
       traceId,
@@ -198,6 +192,10 @@ export class PipelineService implements IPipelineService {
       matchedDocId: preflight.matched_doc_id,
       matchedBy: preflight.matched_by,
       cacheHit: preflight.cache_hit,
+      cacheSource: preflight.cache_source,
+      liveQuery: preflight.live_query,
+      dataSourceId: preflight.data_source_id,
+      warning: preflight.warning,
       sampleNode: preflight.sample_node
     });
 

@@ -57,3 +57,4 @@ logs.txt
 diff.txt
 docker/nginx/certs/*.crt
 docker/nginx/certs/*.key
+interview.md

@@ -83,7 +83,9 @@ export const UploadPage: React.FC<UploadPageProps> = ({
         const updatedById = new Map(updatedRunning.map((operation) => [operation.instanceId, operation]));
         const nextOperations = operations.map((operation) => updatedById.get(operation.instanceId) || operation);
         const completed = nextOperations.find(
-          (operation) => operation.status === 'Completed' && operation.output?.status === 'completed'
+          (operation) =>
+            operation.status === 'Completed' &&
+            (operation.output?.status === 'completed' || operation.output?.status === 'completed_partial')
         );
         const failed = nextOperations.find((operation) => operation.status === 'Failed');
         const representative = completed || nextOperations[0];
@@ -135,7 +137,10 @@ export const UploadPage: React.FC<UploadPageProps> = ({
       setOperations([operation]);
       onPipelineChange(operation);
 
-      if (operation.status === 'Completed' && operation.output?.status === 'completed') {
+      if (
+        operation.status === 'Completed' &&
+        (operation.output?.status === 'completed' || operation.output?.status === 'completed_partial')
+      ) {
         completedNavigationRef.current = true;
         onComplete();
       }
@@ -179,6 +184,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
         }
       : undefined
   );
+  const isContentBlocked = active?.status === 'Completed' && active.output?.status === 'content_blocked';
   const isAnyRunning = operations.some((operation) => !isTerminalStatus(operation.status));
   const formatSize = (size: number): string => `${Math.max(1, Math.round(size / 1024)).toLocaleString('he-IL')} KB`;
   const formatModified = (value: string | undefined): string =>
@@ -200,7 +206,10 @@ export const UploadPage: React.FC<UploadPageProps> = ({
       <section className={styles.panel}>
         <div className={styles.panelHeader}>
           <h2>בחירת מסמך מ-SharePoint</h2>
-          <StatusBadge label={isComplete ? 'מוכן' : phase} tone={isComplete ? 'success' : active ? 'running' : 'neutral'} />
+          <StatusBadge
+            label={isComplete ? 'מוכן' : isContentBlocked ? 'לא נוצר גרף' : phase}
+            tone={isComplete ? 'success' : isContentBlocked ? 'neutral' : active ? 'running' : 'neutral'}
+          />
         </div>
 
         <div className={styles.sharePointHeader}>

@@ -20,7 +20,8 @@ export const isTerminalStatus = (status: RuntimeStatus): boolean =>
   status === 'Completed' || status === 'Failed' || status === 'Canceled' || status === 'Terminated';
 
 export const isSuccessfulPipeline = (status?: DurableStatus<PipelineOutput>): boolean =>
-  status?.runtimeStatus === 'Completed' && status.output?.status === 'completed';
+  status?.runtimeStatus === 'Completed' &&
+  (status.output?.status === 'completed' || status.output?.status === 'completed_partial');
 
 export const deriveDocId = (fileName: string, status?: DurableStatus<PipelineOutput>): string | undefined => {
   if (status?.customStatus?.doc_id) {

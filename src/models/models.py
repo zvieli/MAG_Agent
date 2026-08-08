@@ -7,7 +7,7 @@ import logging
 import os
 from typing import Any, List, Tuple
 from pathlib import Path
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from src.models.base import SchemaConfigModel
 from src.utils.model_helpers import (
     sanitize_value,
@@ -251,3 +251,20 @@ class Edge(BaseModel):
 class RawGraphExtraction(BaseModel):
     nodes: List[Node] = Field(default_factory=list)
     edges: List[Edge] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_graph_integrity(self):
+        node_ids = [node.id for node in self.nodes]
+        if len(node_ids) != len(set(node_ids)):
+            raise ValueError("duplicate node IDs are not permitted")
+        available = set(node_ids)
+        for edge in self.edges:
+            if edge.source == edge.target:
+                raise ValueError(f"self-loop is not permitted: {edge.source}")
+            if edge.source not in available or edge.target not in available:
+                raise ValueError(
+                    f"dangling edge is not permitted: {edge.source}->{edge.target}"
+                )
+            if edge.confidence_score is not None and not 0 <= edge.confidence_score <= 1:
+                raise ValueError("edge confidence_score must be between 0 and 1")
+        return self

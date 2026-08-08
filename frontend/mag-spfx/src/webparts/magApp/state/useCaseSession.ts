@@ -25,6 +25,8 @@ export const useCaseSession = (): CaseSessionState => {
       browserCache.clearByPrefix(`report:${pipeline.docId}`).catch(() => undefined);
       browserCache.clearByPrefix(`community_summaries:${pipeline.docId}`).catch(() => undefined);
       browserCache.clearByPrefix(`timeline:${pipeline.docId}`).catch(() => undefined);
+      browserCache.clearByPrefix(`protocol_completeness:${pipeline.docId}`).catch(() => undefined);
+      browserCache.clearByPrefix(`chat:${pipeline.docId}:`).catch(() => undefined);
     }
 
     setSession({

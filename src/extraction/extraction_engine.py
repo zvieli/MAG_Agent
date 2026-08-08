@@ -23,10 +23,23 @@ from openai import (
 )
 from pydantic import ValidationError
 from src.utils.config import settings
-from src.utils.json_repair import _extract_json_payload, _repair_json_nodes
 from src.models.models import RawGraphExtraction, SCHEMA_CONFIG
+from src.extraction.provider_adapter import (
+    ExtractionOutcomeCode,
+    ProviderClassification,
+    ProviderOutcomeError,
+    classify_provider_exception,
+    classify_returned_response,
+)
+from src.extraction.wire_schema import (
+    create_wire_extraction_model,
+    lint_structured_output_schema,
+    schema_fingerprint,
+    to_graph_dto,
+)
 from src.storage.factory import get_artifact_store
 from src.storage.interfaces import IArtifactStore
+from src.utils.observability import log_metric
 
 logger = logging.getLogger(__name__)
 
@@ -80,17 +93,23 @@ def _schema_version_for(schema_config: Any) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
 
 
-def _extraction_cache_key(model_name: str, schema_version: str, chunk_hash: str) -> str:
+def _extraction_cache_key(
+    model_name: str, schema_version: str, chunk_hash: str, contract_fingerprint: str = "legacy"
+) -> str:
     return (
         f"extraction_cache/{_normalize_artifact_component(model_name)}/"
-        f"{_normalize_artifact_component(schema_version)}/{chunk_hash}.json"
+        f"{_normalize_artifact_component(schema_version)}/"
+        f"{_normalize_artifact_component(contract_fingerprint)}/{chunk_hash}.json"
     )
 
 
-def _extraction_text_key(model_name: str, schema_version: str, chunk_hash: str) -> str:
+def _extraction_text_key(
+    model_name: str, schema_version: str, chunk_hash: str, contract_fingerprint: str = "legacy"
+) -> str:
     return (
         f"extraction_cache/{_normalize_artifact_component(model_name)}/"
-        f"{_normalize_artifact_component(schema_version)}/{chunk_hash}.txt"
+        f"{_normalize_artifact_component(schema_version)}/"
+        f"{_normalize_artifact_component(contract_fingerprint)}/{chunk_hash}.txt"
     )
 
 
@@ -634,8 +653,16 @@ async def extract_from_chunk(
     chunk_hash = hashlib.sha256(chunk_text_stripped.encode("utf-8")).hexdigest()
     model = settings.graphify_extraction_model
     schema_version = _schema_version_for(schema_config)
-    cache_key = _extraction_cache_key(model, schema_version, chunk_hash)
-    text_cache_key = _extraction_text_key(model, schema_version, chunk_hash)
+    wire_model = create_wire_extraction_model(schema_config)
+    wire_schema = wire_model.model_json_schema()
+    lint_structured_output_schema(wire_schema)
+    contract_fingerprint = schema_fingerprint(wire_model)
+    cache_key = _extraction_cache_key(
+        model, schema_version, chunk_hash, contract_fingerprint
+    )
+    text_cache_key = _extraction_text_key(
+        model, schema_version, chunk_hash, contract_fingerprint
+    )
 
     exists = await asyncio.to_thread(store.exists, cache_key)
     if exists:
@@ -687,19 +714,18 @@ async def extract_from_chunk(
                     else nullcontext()
                 )
                 with dns_context:
-                    current_key = getattr(client, "api_key", "UNKNOWN")
                     logger.info(
                         fix_text(
-                            f"--- DEBUG: Sending request to OpenAI | Model/Deployment: {model} | Endpoint: {endpoint} | Key prefix: {current_key[:4]} ---"
+                            f"--- DEBUG: Sending request to OpenAI | Model/Deployment: {model} | Endpoint: {endpoint} ---"
                         )
                     )
                     response = await asyncio.wait_for(
-                        client.chat.completions.create(
+                        client.chat.completions.parse(
                             model=model,
                             messages=await _json_response_messages(p),
                             temperature=temp,
                             max_tokens=m_tokens,
-                            response_format={"type": "json_object"},
+                            response_format=wire_model,
                         ),
                         timeout=settings.llm_request_timeout_seconds,
                     )
@@ -710,6 +736,11 @@ async def extract_from_chunk(
                     )
                 return response
             except asyncio.TimeoutError as exc:
+                if attempt < OPENAI_RATE_LIMIT_MAX_ATTEMPTS - 1:
+                    await asyncio.sleep(
+                        min(OPENAI_RATE_LIMIT_BACKOFF_MAX, 1 + attempt)
+                    )
+                    continue
                 raise TimeoutError(
                     f"OpenAI chat completion timed out after {settings.llm_request_timeout_seconds:.1f}s "
                     f"for chunk {chunk_label}"
@@ -727,15 +758,30 @@ async def extract_from_chunk(
                     continue
                 raise
             except (APIConnectionError, APITimeoutError, OSError) as exc:
-                if (
-                    attempt < OPENAI_RATE_LIMIT_MAX_ATTEMPTS - 1
-                    and DEBUG_MODE
-                    and is_connection_like_error(exc)
-                ):
-                    if endpoint_host and resolved_ip is None:
+                if attempt < OPENAI_RATE_LIMIT_MAX_ATTEMPTS - 1:
+                    if (
+                        DEBUG_MODE
+                        and is_connection_like_error(exc)
+                        and endpoint_host
+                        and resolved_ip is None
+                    ):
                         resolved_ip = resolve_host_ip(endpoint_host)
                     await asyncio.sleep(min(OPENAI_RATE_LIMIT_BACKOFF_MAX, 1 + attempt))
                     continue
+                raise
+            except Exception as exc:
+                classification = classify_provider_exception(exc)
+                if classification is not None:
+                    logger.error(
+                        "[EXTRACTION][PROVIDER] code=%s status=%s request_id=%s "
+                        "signals=%s body_shape=%s",
+                        classification.code.value,
+                        classification.status_code,
+                        classification.request_id,
+                        classification.discovered_codes,
+                        classification.body_key_shape,
+                    )
+                    raise ProviderOutcomeError(classification) from exc
                 raise
         return None
 
@@ -745,9 +791,10 @@ async def extract_from_chunk(
     used_prompt = None
 
     strategies = [
-        {"name": "FULL", "temp": settings.llm_temperature},
-        {"name": "RETRY_FULL", "temp": settings.llm_fallback_temperature},
+        {"name": "STRICT", "temp": 0},
+        {"name": "STRICT_RETRY", "temp": 0},
     ]
+    last_validation_code = ExtractionOutcomeCode.OUTPUT_SCHEMA_INVALID
 
     for strategy in strategies:
         logger.debug(
@@ -762,54 +809,98 @@ async def extract_from_chunk(
             deterministic_entities=deterministic_entities,
         )
 
-        logger.info(f"[DEBUG] Full Prompt for {chunk_label}:\n{used_prompt[:1000]}...")
+        logger.debug("[EXTRACTION] Strict request prepared for chunk %s", chunk_label)
 
         try:
             last_response = await _call_llm(used_prompt, temp=strategy["temp"])
             if not last_response:
                 continue
 
-            content = last_response.choices[0].message.content or ""
-            logger.info(f"[DEBUG] LLM Response Content: {content[:500]}...")
+            classification = classify_returned_response(last_response)
+            if classification is not None:
+                raise ProviderOutcomeError(classification)
+
+            choice = last_response.choices[0]
+            message = choice.message
 
             # Check for truncation
-            if last_response.choices[0].finish_reason == "length":
-                logger.debug(
-                    fix_text(
-                        f"[DEBUG] {strategy['name']} extraction truncated (length limit)"
+            if choice.finish_reason == "length":
+                raise ProviderOutcomeError(
+                    ProviderClassification(
+                        code=ExtractionOutcomeCode.OUTPUT_INCOMPLETE,
+                        request_id=getattr(last_response, "_request_id", None),
+                        provider_signal="finish_reason.length",
+                        sanitized_reason="Structured output was truncated by the token limit.",
                     )
                 )
-                continue
 
-            payload = _extract_json_payload(content)
-            payload = _repair_json_nodes(payload)
-            extraction = RawGraphExtraction.model_validate_json(payload)
-
-            # Bulletproof Self-Loop Defense: Filter out edges where source == target
-            extraction.edges = [e for e in extraction.edges if e.source != e.target]
+            parsed = getattr(message, "parsed", None)
+            if parsed is None:
+                raise ValidationError.from_exception_data(
+                    "StrictGraphExtraction",
+                    [{"type": "missing", "loc": ("message", "parsed"), "input": None}],
+                )
+            validated_wire = wire_model.model_validate(parsed)
+            extraction = to_graph_dto(validated_wire)
 
             # If we reach here, validation succeeded
             break
+        except ProviderOutcomeError as exc:
+            if exc.classification.code in {
+                ExtractionOutcomeCode.CONTENT_BLOCKED,
+                ExtractionOutcomeCode.OUTPUT_INCOMPLETE,
+                ExtractionOutcomeCode.PROVIDER_SCHEMA_UNSUPPORTED,
+                ExtractionOutcomeCode.PROVIDER_ERROR_UNCLASSIFIED,
+            }:
+                raise
+            last_validation_code = exc.classification.code
         except (AuthenticationError, PermissionDeniedError, RateLimitError, TimeoutError):
             # Propagate critical infrastructure errors immediately
             raise
-        except (ValidationError, ValueError, json.JSONDecodeError, Exception) as exc:
-            import traceback
-            traceback.print_exc()
-            logger.error(
-                fix_text(
-                    f"[DEBUG] {strategy['name']} extraction failed for '{chunk_label}': {exc}"
-                )
+        except ValidationError as exc:
+            logic_error = any(
+                error.get("type") == "value_error"
+                and not tuple(error.get("loc") or ())[:-1]
+                for error in exc.errors()
             )
+            last_validation_code = (
+                ExtractionOutcomeCode.OUTPUT_LOGIC_INVALID
+                if logic_error
+                else ExtractionOutcomeCode.OUTPUT_SCHEMA_INVALID
+            )
+            logger.warning(
+                "[EXTRACTION] %s validation failed for chunk %s (attempt %d/2)",
+                last_validation_code.value,
+                chunk_label,
+                strategies.index(strategy) + 1,
+            )
+            log_metric(
+                "pipeline_extraction_validation_failure_count",
+                1,
+                outcome=last_validation_code.value,
+            )
+            if strategies.index(strategy) < len(strategies) - 1:
+                log_metric(
+                    "pipeline_extraction_validation_retry_count",
+                    1,
+                    outcome=last_validation_code.value,
+                )
             continue
 
     if not extraction:
-        error_msg = f"All extraction strategies failed for chunk {chunk_label}."
-        logger.error(fix_text(f"ERROR: {error_msg} Raising error to fail activity."))
-        raise RuntimeError(error_msg)
+        raise ProviderOutcomeError(
+            ProviderClassification(
+                code=last_validation_code,
+                request_id=getattr(last_response, "_request_id", None),
+                provider_signal="pydantic_validation",
+                sanitized_reason="Structured extraction failed strict validation after one retry.",
+            )
+        )
 
     token_usage = _response_token_usage(
-        last_response, used_prompt, last_response.choices[0].message.content
+        last_response,
+        used_prompt,
+        last_response.choices[0].message.content or "",
     )
 
     # Note: Normalization and Hebrew spec enforcement happen in the GraphNormalizer and Orchestrator.
@@ -822,6 +913,8 @@ async def extract_from_chunk(
             "timestamp": str(asyncio.get_event_loop().time()),
             "model_name": model,
             "schema_version": schema_version,
+            "schema_fingerprint": contract_fingerprint,
+            "contract": "strict_structured_outputs_v1",
         }
         await asyncio.to_thread(store.write_bytes, text_cache_key, chunk_text.encode("utf-8"))
         await asyncio.to_thread(

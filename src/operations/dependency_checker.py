@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import socket
 import time
+from importlib.metadata import version
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
@@ -123,8 +124,45 @@ class DependencyChecker:
 
     async def _check_openai(self) -> str:
         from src.extraction.extraction_engine import _build_azure_client
+        from src.extraction.wire_schema import (
+            create_wire_extraction_model,
+            lint_structured_output_schema,
+        )
+        from src.models.models import SCHEMA_CONFIG
+        import pydantic
+
+        installed_openai = version("openai")
+        if installed_openai != "2.32.0":
+            raise RuntimeError(
+                f"openai==2.32.0 is required; installed version is {installed_openai}"
+            )
+        if int(pydantic.__version__.split(".", 1)[0]) < 2:
+            raise RuntimeError(f"Pydantic v2 is required; installed version is {pydantic.__version__}")
 
         client = _build_azure_client()
+        parse_method = getattr(getattr(client.chat, "completions", None), "parse", None)
+        if not callable(parse_method):
+            raise RuntimeError("Installed OpenAI SDK does not expose chat.completions.parse")
+        wire_model = create_wire_extraction_model(SCHEMA_CONFIG)
+        schema_counts = lint_structured_output_schema(wire_model.model_json_schema())
+
+        extraction_model = settings.graphify_extraction_model
+        structured_response = await parse_method(
+            model=extraction_model,
+            messages=[
+                {"role": "system", "content": "Return a strictly valid empty graph extraction."},
+                {"role": "user", "content": "No source content is present. Return empty nodes and edges."},
+            ],
+            temperature=0,
+            max_tokens=128,
+            response_format=wire_model,
+        )
+        message = structured_response.choices[0].message
+        if getattr(message, "refusal", None):
+            raise RuntimeError("Structured Outputs deployment probe was refused")
+        if getattr(message, "parsed", None) is None:
+            raise RuntimeError("Structured Outputs deployment probe returned no parsed value")
+
         model = (
             settings.azure_openai_embedding_deployment
             or settings.azure_openai_embedding_model
@@ -133,7 +171,10 @@ class DependencyChecker:
         response = await client.embeddings.create(input=["ping"], model=model)
         if not getattr(response, "data", None):
             raise RuntimeError("OpenAI embedding probe returned no data")
-        return f"Embedding probe succeeded with {model}"
+        return (
+            f"Structured Outputs probe succeeded with {extraction_model}; embedding probe "
+            f"succeeded with {model}; schema counts={schema_counts}"
+        )
 
     async def _check_document_intelligence(self) -> str:
         if not settings.azure_document_intelligence_endpoint:

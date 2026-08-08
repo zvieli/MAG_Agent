@@ -15,6 +15,12 @@ from src.storage.factory import (
 from src.storage.interfaces import IArtifactStore
 from src.extraction.extraction_engine import _build_azure_client
 from src.extraction.extraction_engine import extract_from_chunk
+from src.extraction.extraction_engine import _estimate_token_count, _schema_version_for
+from src.extraction.provider_adapter import ExtractionOutcomeCode, ProviderOutcomeError
+from src.extraction.wire_schema import (
+    create_wire_extraction_model,
+    schema_fingerprint,
+)
 from src.processing.document_processor import (
     _load_document_pages,
     _load_document_pages_via_di,
@@ -74,8 +80,16 @@ def _final_graph_path(doc_id: str) -> str:
     return f"graph/{doc_id}/final.json"
 
 
+def _ingestion_manifest_path(doc_id: str) -> str:
+    return f"graph/{doc_id}/ingestion_manifest.json"
+
+
 def _extracted_text_path(doc_id: str) -> str:
     return f"extracted_text/{doc_id}.md"
+
+
+def _processed_text_path(doc_id: str) -> str:
+    return f"extracted_text/{doc_id}.processed.md"
 
 
 async def _build_community_summary_payload(
@@ -224,6 +238,29 @@ async def _index_chunks(doc_id: str, chunks: List[Dict[str, Any]]) -> None:
         await asyncio.gather(*tasks)
 
 
+async def _delete_indexed_chunks(doc_id: str, chunk_ids: List[str]) -> None:
+    """Ensure newly blocked chunks cannot remain in the semantic retrieval index."""
+    if (
+        not chunk_ids
+        or not getattr(settings, "use_azure_search", False)
+        or not settings.azure_search_endpoint
+    ):
+        return
+
+    search_mgr = get_search_manager()
+    await search_mgr.ensure_investigation_indices()
+    documents = [
+        {
+            "id": SearchManager._sanitize_id(
+                f"{doc_id}_{int(chunk_id) if str(chunk_id).isdigit() else chunk_id}"
+            )
+        }
+        for chunk_id in chunk_ids
+    ]
+    client = search_mgr.get_search_client(settings.azure_search_index)
+    await client.delete_documents(documents=documents)
+
+
 async def _index_nodes(doc_id: str, nodes: List[Dict[str, Any]]) -> None:
     logging.info("[ACTIVITY][FINAL_INDEXING] Node indexing to AI Search is disabled per design.")
     return
@@ -293,8 +330,6 @@ async def run_chunking(
     for chunk in chunks:
         chunk["doc_id"] = doc_id
         chunk["source_blob_path"] = input_blob_path
-
-    await _index_chunks(doc_id, chunks)
 
     # Claim-check: Save individual chunk payloads and manifest to storage
     logging.info(f"[ACTIVITY][CHUNKING] Starting materialization for {len(chunks)} chunks")
@@ -380,23 +415,84 @@ async def activity_extract_chunk(payload: Dict[str, Any]) -> Dict[str, Any]:
         text = chunk_data["text"]
         chunk_idx = chunk_data.get("chunk_index", "0")
 
-        extraction, token_usage = await extract_from_chunk(
-            None,
-            text,
-            SCHEMA_CONFIG,
-            chunk_label=str(chunk_idx).zfill(5),
-            artifact_store=store,
-        )
+        try:
+            extraction, token_usage = await extract_from_chunk(
+                None,
+                text,
+                SCHEMA_CONFIG,
+                chunk_label=str(chunk_idx).zfill(5),
+                artifact_store=store,
+            )
+        except ProviderOutcomeError as exc:
+            classification = exc.classification
+            if classification.code is not ExtractionOutcomeCode.CONTENT_BLOCKED:
+                raise
+            token_count = int(chunk_data.get("token_count") or _estimate_token_count(text))
+            blocked_payload = {
+                "outcome": "content_blocked",
+                "doc_id": doc_id,
+                "chunk_id": chunk_id,
+                "page_range": list(chunk_data.get("page_range") or []),
+                "token_count": token_count,
+                "request_id": classification.request_id,
+                "provider_signal": classification.provider_signal,
+                "reason": classification.sanitized_reason,
+            }
+            log_event(
+                "pipeline.extraction.chunk_blocked",
+                doc_id=doc_id,
+                chunk_id=chunk_id,
+                page_range=blocked_payload["page_range"],
+                provider_signal=classification.provider_signal,
+                request_id=classification.request_id,
+                status_code=classification.status_code,
+                discovered_codes=classification.discovered_codes,
+                body_key_shape=classification.body_key_shape,
+            )
+            log_metric("pipeline_filtered_chunks_count", 1, doc_id=doc_id)
+            return blocked_payload
 
         result_payload = {
+            "outcome": "success",
             "doc_id": doc_id,
             "chunk_id": chunk_id,
             "extraction": extraction.model_dump(),
             "token_usage": token_usage,
+            "token_count": int(chunk_data.get("token_count") or _estimate_token_count(text)),
+            "page_range": list(chunk_data.get("page_range") or []),
             "source_label": chunk_data.get("label", f"Chunk {chunk_id}"),
         }
 
         return result_payload
+    except ProviderOutcomeError as e:
+        classification = e.classification
+        logging.error(
+            "[ACTIVITY][EXTRACT_CHUNK] fail_closed code=%s status=%s request_id=%s "
+            "signals=%s body_shape=%s",
+            classification.code.value,
+            classification.status_code,
+            classification.request_id,
+            classification.discovered_codes,
+            classification.body_key_shape,
+        )
+        log_event(
+            "pipeline.extraction.fail_closed",
+            level=logging.ERROR,
+            doc_id=locals().get("doc_id", "unknown"),
+            chunk_id=locals().get("chunk_id", "unknown"),
+            outcome=classification.code.value,
+            status_code=classification.status_code,
+            request_id=classification.request_id,
+            discovered_codes=classification.discovered_codes,
+            body_key_shape=classification.body_key_shape,
+        )
+        log_metric(
+            "pipeline_extraction_outcome_count",
+            1,
+            doc_id=locals().get("doc_id", "unknown"),
+            outcome=classification.code.value,
+        )
+        raise RuntimeError(str(e)) from None
     except Exception as e:
         import traceback
         error_msg = _compact_error(
@@ -408,17 +504,37 @@ async def activity_extract_chunk(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 async def activity_merge_partials(
-    extraction_results: List[Dict[str, Any]],
-) -> str:
+    extraction_results: List[Dict[str, Any]] | Dict[str, Any],
+) -> str | Dict[str, Any]:
     try:
         store = _get_artifact_store()
-        logging.info("[ACTIVITY][MERGE_PARTIALS] input_count=%s", len(extraction_results))
+        legacy_return = isinstance(extraction_results, list) and not any(
+            isinstance(item, dict) and item.get("outcome") for item in extraction_results
+        )
+        envelope = extraction_results if isinstance(extraction_results, dict) else {}
+        results = (
+            list(envelope.get("results") or [])
+            if isinstance(extraction_results, dict)
+            else extraction_results
+        )
+        trace_id = str(envelope.get("trace_id") or "")
+        expected_doc_id = str(envelope.get("doc_id") or "unknown")
+        logging.info("[ACTIVITY][MERGE_PARTIALS] input_count=%s", len(results))
         all_nodes: list[dict[str, Any]] = []
         all_edges: list[dict[str, Any]] = []
-        doc_id = "unknown"
+        doc_id = expected_doc_id
+        blocked: list[dict[str, Any]] = []
+        successful: list[dict[str, Any]] = []
 
-        for result_data in extraction_results:
+        for result_data in results:
             doc_id = result_data.get("doc_id", doc_id)
+            outcome = result_data.get("outcome")
+            if outcome not in {None, "success", "content_blocked"}:
+                raise ValueError(f"Unsupported chunk extraction outcome: {outcome}")
+            if outcome == "content_blocked":
+                blocked.append(result_data)
+                continue
+            successful.append(result_data)
             chunk_id = result_data.get("chunk_id", "unknown")
             # Use page-based label if available, fall back to chunk ID
             source_label = result_data.get("source_label") or f"Chunk {chunk_id}"
@@ -436,8 +552,99 @@ async def activity_merge_partials(
                 d["source_location"] = source_label
                 all_edges.append(d)
 
+        total_tokens = sum(max(0, int(item.get("token_count") or 0)) for item in results)
+        successful_tokens = sum(
+            max(0, int(item.get("token_count") or 0)) for item in successful
+        )
+        coverage_ratio = successful_tokens / total_tokens if total_tokens else (
+            len(successful) / len(results) if results else 0.0
+        )
+        wire_model = create_wire_extraction_model(SCHEMA_CONFIG)
+        manifest_path = _ingestion_manifest_path(doc_id)
+        manifest = {
+            "doc_id": doc_id,
+            "status": "completed_partial" if blocked else "completed",
+            "is_partial": bool(blocked),
+            "review_required": bool(blocked),
+            "total_chunks": len(results),
+            "successful_chunks": len(successful),
+            "blocked_chunks": len(blocked),
+            "coverage_ratio": coverage_ratio,
+            "coverage_method": "token_weighted",
+            "total_source_tokens": total_tokens,
+            "successful_source_tokens": successful_tokens,
+            "blocked_chunk_ids": [str(item.get("chunk_id")) for item in blocked],
+            "blocked_page_ranges": [list(item.get("page_range") or []) for item in blocked],
+            "blocked_ranges": [
+                {
+                    "chunk_id": str(item.get("chunk_id")),
+                    "page_range": list(item.get("page_range") or []),
+                    "request_id": item.get("request_id"),
+                    "provider_signal": item.get("provider_signal"),
+                    "reason": item.get("reason"),
+                }
+                for item in blocked
+            ],
+            "model_deployment": settings.graphify_extraction_model,
+            "ontology_version": _schema_version_for(SCHEMA_CONFIG),
+            "schema_fingerprint": schema_fingerprint(wire_model),
+            "contract": "strict_structured_outputs_v1",
+            "trace_id": trace_id,
+            "processed_source_path": _processed_text_path(doc_id),
+        }
+
+        await _delete_indexed_chunks(
+            doc_id, [str(item.get("chunk_id")) for item in blocked]
+        )
+
+        if blocked and not all_nodes and not all_edges:
+            manifest["status"] = "content_blocked"
+            await asyncio.to_thread(
+                store.write_bytes,
+                manifest_path,
+                json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8"),
+            )
+            return {
+                "status": "content_blocked",
+                "merged_graph_path": None,
+                "manifest_path": manifest_path,
+                **manifest,
+            }
+
         resolver = DefaultEntityResolver(SCHEMA_CONFIG)
         resolved_nodes, resolved_edges, report = await resolver.resolve(all_nodes, all_edges)
+
+        if blocked and not resolved_nodes and not resolved_edges:
+            manifest["status"] = "content_blocked"
+            await asyncio.to_thread(
+                store.write_bytes,
+                manifest_path,
+                json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8"),
+            )
+            return {
+                "status": "content_blocked",
+                "merged_graph_path": None,
+                "manifest_path": manifest_path,
+                **manifest,
+            }
+
+        successful_chunk_payloads: list[dict[str, Any]] = []
+        if not legacy_return:
+            for item in successful:
+                chunk_path = _chunk_artifact_path(doc_id, str(item.get("chunk_id")))
+                chunk_bytes = await asyncio.to_thread(store.read_bytes, chunk_path)
+                successful_chunk_payloads.append(json.loads(chunk_bytes.decode("utf-8")))
+
+            processed_text = "\n\n".join(
+                f"## {chunk.get('label') or 'Processed source range'}\n\n{chunk.get('text') or ''}"
+                for chunk in successful_chunk_payloads
+            )
+            await asyncio.to_thread(
+                store.write_bytes,
+                _processed_text_path(doc_id),
+                processed_text.encode("utf-8"),
+            )
+            await _index_chunks(doc_id, successful_chunk_payloads)
 
         graph_data = {
             "nodes": resolved_nodes,
@@ -445,15 +652,30 @@ async def activity_merge_partials(
             "metadata": {
                 "doc_id": doc_id,
                 "entity_resolution_report": report,
+                **manifest,
+                "manifest_path": manifest_path,
             },
         }
 
         merged_graph_path = f"graph/{doc_id}/partial.json"
         graph_bytes = json.dumps(graph_data, indent=2, ensure_ascii=False).encode("utf-8")
         await asyncio.to_thread(store.write_bytes, merged_graph_path, graph_bytes)
+        if not legacy_return:
+            await asyncio.to_thread(
+                store.write_bytes,
+                manifest_path,
+                json.dumps(manifest, indent=2, ensure_ascii=False).encode("utf-8"),
+            )
 
         logging.info(f"[ACTIVITY][MERGE_PARTIALS] Merged graph written to {merged_graph_path}")
-        return merged_graph_path
+        if legacy_return:
+            return merged_graph_path
+        return {
+            "status": manifest["status"],
+            "merged_graph_path": merged_graph_path,
+            "manifest_path": manifest_path,
+            **manifest,
+        }
     except Exception as e:
         import traceback
         error_msg = _compact_error(
@@ -555,7 +777,12 @@ async def activity_final_indexing(merged_graph_path: str) -> str:
             # Load raw text to count words
             raw_text = ""
             try:
-                md_path = _extracted_text_path(doc_id)
+                metadata = graph_data.get("metadata") or {}
+                md_path = (
+                    metadata.get("processed_source_path")
+                    if metadata.get("is_partial")
+                    else _extracted_text_path(doc_id)
+                )
                 if await asyncio.to_thread(store.exists, md_path):
                     md_bytes = await asyncio.to_thread(store.read_bytes, md_path)
                     raw_text = md_bytes.decode("utf-8")
@@ -767,4 +994,3 @@ async def activity_verify_protocol_completeness(payload: Dict[str, Any]) -> Dict
     except Exception as exc:
         logging.error(f"[ACTIVITY][VERIFY_COMPLETENESS] Verification failed for doc_id {doc_id}: {exc}", exc_info=True)
         return {}
-

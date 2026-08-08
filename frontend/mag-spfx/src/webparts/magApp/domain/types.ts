@@ -22,6 +22,11 @@ export interface PipelineCustomStatus {
   completed_chunks?: number;
   current_batch?: number;
   last_error?: string | null;
+  blocked_chunks?: number;
+  coverage_ratio?: number;
+  blocked_page_ranges?: number[][];
+  manifest_path?: string | null;
+  review_required?: boolean;
 }
 
 export interface DurableStatus<TOutput = unknown> {
@@ -47,19 +52,29 @@ export interface PipelineOutput {
   blob_path?: string;
   final_graph_path?: string | null;
   reused_existing_case?: boolean;
+  trace_id?: string;
+  manifest_path?: string | null;
+  coverage_ratio?: number;
+  blocked_count?: number;
+  blocked_page_ranges?: number[][];
+  review_required?: boolean;
 }
 
 export interface PipelinePreflightResult {
   status: 'duplicate' | 'new' | 'error';
   doc_id: string;
   matched_doc_id?: string | null;
-  matched_by?: 'partitionKey' | 'source_file' | 'none';
+  matched_by?: 'pk' | 'partitionKey' | 'source_file' | 'none';
   sample_node?: {
     id: string;
     label: string;
     type: string;
   } | null;
   cache_hit?: boolean;
+  cache_source?: 'none';
+  live_query?: boolean;
+  data_source_id?: string | null;
+  warning?: string;
   error?: string;
   trace_id?: string;
 }
@@ -140,6 +155,13 @@ export interface GraphQueryResult {
     edgeCount: number;
     nodeTypes: string[];
     generatedAt: string;
+    is_partial?: boolean;
+    review_required?: boolean;
+    coverage_ratio?: number;
+    blocked_chunks?: number;
+    blocked_page_ranges?: number[][];
+    trace_id?: string;
+    manifest_path?: string;
   };
   cache?: CacheMetadata;
 }
@@ -151,6 +173,17 @@ export interface ReportResult {
   updatedAt: string;
   cache?: CacheMetadata;
   error?: string;
+  coverage?: CoverageMetadata;
+}
+
+export interface CoverageMetadata {
+  is_partial?: boolean;
+  review_required?: boolean;
+  coverage_ratio?: number;
+  blocked_chunks?: number;
+  blocked_page_ranges?: number[][];
+  trace_id?: string;
+  manifest_path?: string;
 }
 
 export interface CommunitySummariesResult {

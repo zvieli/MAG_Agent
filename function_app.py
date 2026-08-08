@@ -16,6 +16,7 @@ except Exception as e:
     logging.error(f"Failed to import Azure modules: {e}")
 
 from src.processing import orchestration_activities as pipeline_activities
+from src.graph.cosmos_manager import DUPLICATE_MATCH_FIELDS, duplicate_lookup_query
 from src.storage.factory import get_artifact_store
 from src.storage.factory import get_cosmos_manager
 from src.utils.config import settings
@@ -28,10 +29,6 @@ from src.auth.decorators import require_token_auth
 # Initialize the Durable Functions App (Python V2 Model)
 app = df.DFApp(http_auth_level=func.AuthLevel.ANONYMOUS)
 
-_DUPLICATE_PREFLIGHT_CACHE: Dict[str, Dict[str, Any]] = {}
-_DUPLICATE_PREFLIGHT_TTL_SECONDS = 300
-
-
 def _batched(items: List[str], batch_size: int) -> List[List[str]]:
     safe_batch_size = max(1, int(batch_size))
     return [
@@ -43,7 +40,7 @@ def _batched(items: List[str], batch_size: int) -> List[List[str]]:
 CORS_HEADERS = {
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
-    "Access-Control-Allow-Headers": "Authorization, Content-Type, x-functions-key, *",
+    "Access-Control-Allow-Headers": "Authorization, Content-Type, Content-Disposition, x-functions-key, x-mag-file-name, *",
     "Access-Control-Max-Age": "86400",
 }
 
@@ -90,12 +87,33 @@ def _check_status_response_with_cors(
     return res
 
 
-def _json_response(data: Any, status_code: int = 200, req: func.HttpRequest | None = None) -> func.HttpResponse:
+def _json_response(
+    data: Any,
+    status_code: int = 200,
+    req: func.HttpRequest | None = None,
+    headers: Dict[str, str] | None = None,
+) -> func.HttpResponse:
+    response_headers = _get_cors_headers_for_req(req)
+    response_headers.update(headers or {})
     return func.HttpResponse(
         json.dumps(data, ensure_ascii=False),
         status_code=status_code,
         mimetype="application/json",
-        headers=_get_cors_headers_for_req(req),
+        headers=response_headers,
+    )
+
+
+def _preflight_json_response(
+    data: Any, status_code: int = 200, req: func.HttpRequest | None = None
+) -> func.HttpResponse:
+    return _json_response(
+        data,
+        status_code=status_code,
+        req=req,
+        headers={
+            "Cache-Control": "no-store, max-age=0",
+            "Pragma": "no-cache",
+        },
     )
 
 
@@ -140,6 +158,11 @@ def _pipeline_status_payload(
     completed_chunks: int,
     current_batch: int,
     last_error: str | None,
+    blocked_chunks: int = 0,
+    coverage_ratio: float | None = None,
+    blocked_page_ranges: List[List[int]] | None = None,
+    manifest_path: str | None = None,
+    review_required: bool = False,
 ) -> Dict[str, Any]:
     return {
         "phase": phase,
@@ -151,6 +174,11 @@ def _pipeline_status_payload(
         "completed_chunks": completed_chunks,
         "current_batch": current_batch,
         "last_error": last_error,
+        "blocked_chunks": blocked_chunks,
+        "coverage_ratio": coverage_ratio,
+        "blocked_page_ranges": blocked_page_ranges or [],
+        "manifest_path": manifest_path,
+        "review_required": review_required,
     }
 
 
@@ -163,6 +191,61 @@ def _doc_id_from_filename(filename: str) -> str:
     return os.path.splitext(safe_name)[0]
 
 
+def _normalize_upload_filename(raw_filename: Any) -> str:
+    decoded = urllib.parse.unquote(str(raw_filename or "").strip()).strip('"')
+    basename = decoded.replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not basename or basename in {".", ".."} or "\x00" in basename:
+        raise ValueError("A valid PDF filename is required")
+    if not basename.lower().endswith(".pdf"):
+        basename += ".pdf"
+    if not _doc_id_from_filename(basename):
+        raise ValueError("A valid PDF filename is required")
+    return basename
+
+
+def _content_disposition_filename(content_disposition: str) -> str:
+    if not content_disposition:
+        return ""
+    extended = re.search(
+        r"filename\*\s*=\s*(?:UTF-8'')?([^;]+)",
+        content_disposition,
+        flags=re.IGNORECASE,
+    )
+    if extended:
+        return extended.group(1).strip().strip('"')
+    regular = re.search(
+        r'filename\s*=\s*"?([^";]+)"?',
+        content_disposition,
+        flags=re.IGNORECASE,
+    )
+    return regular.group(1).strip() if regular else ""
+
+
+def _resolve_upload_filename(req: func.HttpRequest) -> str:
+    candidates = {
+        "query": req.params.get("filename") or "",
+        "header": req.headers.get("x-mag-file-name") or "",
+        "content_disposition": _content_disposition_filename(
+            req.headers.get("Content-Disposition", "")
+        ),
+    }
+    normalized = {
+        source: _normalize_upload_filename(value)
+        for source, value in candidates.items()
+        if str(value or "").strip()
+    }
+    if not normalized:
+        raise ValueError("Missing PDF filename")
+    filenames = set(normalized.values())
+    if len(filenames) != 1:
+        logging.warning(
+            "[PIPELINE_START] Conflicting filename metadata sources=%s",
+            sorted(normalized),
+        )
+        raise ValueError("Conflicting PDF filename metadata")
+    return next(iter(filenames))
+
+
 def _legacy_encoded_doc_id(doc_id: str) -> str:
     if not doc_id or "%" in doc_id:
         return ""
@@ -173,6 +256,38 @@ def _legacy_encoded_doc_id(doc_id: str) -> str:
 
 def _graph_payload_has_data(payload: Dict[str, Any]) -> bool:
     return bool(payload.get("nodes") or payload.get("edges"))
+
+
+def _case_coverage_metadata(doc_id: str) -> Dict[str, Any]:
+    """Read the authoritative ingestion manifest without exposing blocked text."""
+    try:
+        store = get_artifact_store()
+        path = f"graph/{doc_id}/ingestion_manifest.json"
+        if store.exists(path):
+            payload = json.loads(store.read_bytes(path).decode("utf-8"))
+            if isinstance(payload, dict):
+                return payload
+    except Exception as exc:
+        logging.warning("[COVERAGE] Failed reading manifest for %s: %s", doc_id, exc)
+    return {
+        "is_partial": False,
+        "review_required": False,
+        "coverage_ratio": 1.0,
+        "blocked_chunks": 0,
+        "blocked_page_ranges": [],
+    }
+
+
+def _partial_coverage_notice(metadata: Dict[str, Any]) -> str:
+    ranges = metadata.get("blocked_page_ranges") or []
+    coverage = float(metadata.get("coverage_ratio") or 0.0) * 100
+    return (
+        "⚠️ Incomplete source coverage: provider-blocked page ranges "
+        f"{ranges} were excluded (token-weighted coverage {coverage:.1f}%). "
+        "The answer applies only to processed source ranges and does not establish "
+        "that an entity, relationship, or offense is absent from the entire document. "
+        f"Review trace ID: {metadata.get('trace_id') or 'unavailable'}."
+    )
 
 
 def _property_value(properties: Dict[str, Any], key: str, default: Any = None) -> Any:
@@ -240,58 +355,89 @@ async def _case_duplicate_preflight(filename_or_doc_id: str) -> Dict[str, Any]:
             "matched_doc_id": None,
             "matched_by": "none",
             "sample_node": None,
+            "cache_hit": False,
+            "cache_source": "none",
+            "live_query": False,
+            "data_source_id": None,
         }
 
-    now = time.time()
-    cached = _DUPLICATE_PREFLIGHT_CACHE.get(doc_id)
-    if cached and now - float(cached.get("cached_at", 0)) < _DUPLICATE_PREFLIGHT_TTL_SECONDS:
-        payload = dict(cached["payload"])
-        payload["cache_hit"] = True
-        return payload
+    # A partial case must remain reprocessable.  The manifest is authoritative,
+    # even when graph vertices already exist from an earlier partial run.
+    try:
+        store = get_artifact_store()
+        manifest_path = f"graph/{doc_id}/ingestion_manifest.json"
+        if store.exists(manifest_path):
+            manifest = json.loads(store.read_bytes(manifest_path).decode("utf-8"))
+            if manifest.get("is_partial") or manifest.get("status") == "content_blocked":
+                return {
+                    "status": "new",
+                    "doc_id": doc_id,
+                    "matched_doc_id": None,
+                    "matched_by": "none",
+                    "sample_node": None,
+                    "cache_hit": False,
+                    "cache_source": "none",
+                    "live_query": False,
+                    "data_source_id": None,
+                    "reprocess_partial": True,
+                }
+    except Exception as exc:
+        logging.warning("[DUPLICATE_PREFLIGHT] Manifest check failed for %s: %s", doc_id, exc)
 
     cosmos_mgr = get_cosmos_manager()
-    query = (
-        "g.V().has('pk', pk).limit(1)"
-        ".project('id', 'label', 'properties')"
-        ".by(id()).by(label()).by(valueMap(true))"
+    identity = getattr(cosmos_mgr, "data_source_identity", None)
+    data_source_id = (
+        identity.get("data_source_id") if isinstance(identity, dict) else None
     )
-    matched_by = "pk"
-    vertices = await cosmos_mgr.execute_query(query, {"pk": doc_id})
+    matched_by = "none"
+    matched_vertex: Dict[str, Any] | None = None
+    warnings: List[str] = []
 
-    if not vertices:
-        query = (
-            "g.V().has('partitionKey', pk).limit(1)"
-            ".project('id', 'label', 'properties')"
-            ".by(id()).by(label()).by(valueMap(true))"
+    for property_name in DUPLICATE_MATCH_FIELDS:
+        vertices = await cosmos_mgr.execute_query(
+            duplicate_lookup_query(property_name),
+            {"requested_doc_id": doc_id},
         )
-        matched_by = "partitionKey"
-        vertices = await cosmos_mgr.execute_query(query, {"pk": doc_id})
+        if not vertices:
+            continue
 
-    if not vertices:
-        query = (
-            "g.V().has('source_file', source_file).limit(1)"
-            ".project('id', 'label', 'properties')"
-            ".by(id()).by(label()).by(valueMap(true))"
-        )
-        matched_by = "source_file"
-        vertices = await cosmos_mgr.execute_query(query, {"source_file": doc_id})
+        candidate = vertices[0]
+        if not isinstance(candidate, dict):
+            warnings.append(f"invalid_lookup_result:{property_name}")
+            logging.error(
+                "[DUPLICATE_PREFLIGHT] Invalid lookup result shape for doc_id=%s field=%s data_source_id=%s",
+                doc_id,
+                property_name,
+                data_source_id,
+            )
+            continue
 
-    if vertices:
-        sample_node = _sample_node_from_vertex(vertices[0])
-        props = vertices[0].get("properties") or {}
-        matched_doc_id = (
-            _property_value(props, "partitionKey")
-            or _property_value(props, "pk")
-            or _property_value(props, "source_file")
-            or doc_id
-        )
+        matched_value = _property_value(candidate, "matched_value")
+        if str(matched_value or "") != doc_id:
+            warnings.append(f"lookup_value_mismatch:{property_name}")
+            logging.error(
+                "[DUPLICATE_PREFLIGHT] Lookup value mismatch for doc_id=%s field=%s data_source_id=%s",
+                doc_id,
+                property_name,
+                data_source_id,
+            )
+            continue
+
+        matched_by = property_name
+        matched_vertex = candidate
+        break
+
+    if matched_vertex is not None:
         payload = {
             "status": "duplicate",
             "doc_id": doc_id,
-            "matched_doc_id": str(matched_doc_id),
+            "matched_doc_id": doc_id,
             "matched_by": matched_by,
-            "sample_node": sample_node,
+            "sample_node": _sample_node_from_vertex(matched_vertex),
             "cache_hit": False,
+            "cache_source": "none",
+            "live_query": True,
+            "data_source_id": data_source_id,
         }
     else:
         payload = {
@@ -301,10 +447,12 @@ async def _case_duplicate_preflight(filename_or_doc_id: str) -> Dict[str, Any]:
             "matched_by": "none",
             "sample_node": None,
             "cache_hit": False,
+            "cache_source": "none",
+            "live_query": True,
+            "data_source_id": data_source_id,
         }
-
-    if payload.get("status") == "duplicate":
-        _DUPLICATE_PREFLIGHT_CACHE[doc_id] = {"cached_at": now, "payload": payload}
+    if warnings:
+        payload["warning"] = ",".join(warnings)
     return payload
 
 
@@ -389,6 +537,7 @@ async def _graph_payload_from_gremlin(doc_id: str, limit: int = 250) -> Dict[str
             "edgeCount": len(ui_edges),
             "nodeTypes": sorted(node_types),
             "generatedAt": datetime.utcnow().isoformat() + "Z",
+            **_case_coverage_metadata(doc_id),
         },
     }
 
@@ -474,6 +623,7 @@ async def _timeline_payload_from_gremlin(doc_id: str, limit: int = 1000) -> Dict
         "nodes": ui_nodes,
         "edges": ui_edges,
         "nodeTypes": list(node_types),
+        "metadata": _case_coverage_metadata(doc_id),
     }
 
 # --------------------------------------------------------------------------------
@@ -767,12 +917,16 @@ async def get_case_report(req: func.HttpRequest) -> func.HttpResponse:
         try:
             if store.exists(path):
                 markdown = store.read_bytes(path).decode("utf-8")
+                coverage = _case_coverage_metadata(doc_id)
+                if coverage.get("is_partial") and "Incomplete source coverage" not in markdown:
+                    markdown = _partial_coverage_notice(coverage) + "\n\n" + markdown
                 return _json_response(
                     {
                         "docId": doc_id,
                         "markdown": markdown,
                         "source": "blob",
                         "updatedAt": datetime.utcnow().isoformat() + "Z",
+                        "coverage": coverage,
                     }
                 )
         except Exception as exc:
@@ -790,12 +944,16 @@ async def get_case_report(req: func.HttpRequest) -> func.HttpResponse:
         try:
             if store.exists(path):
                 markdown = store.read_bytes(path).decode("utf-8")
+                coverage = _case_coverage_metadata(doc_id)
+                if coverage.get("is_partial") and "Incomplete source coverage" not in markdown:
+                    markdown = _partial_coverage_notice(coverage) + "\n\n" + markdown
                 return _json_response(
                     {
                         "docId": doc_id,
                         "markdown": markdown,
                         "source": "blob",
                         "updatedAt": datetime.utcnow().isoformat() + "Z",
+                        "coverage": coverage,
                     }
                 )
         except Exception as exc:
@@ -1022,7 +1180,7 @@ async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestr
     Starts the orchestration and returns the instance ID.
     """
     if req.method == "OPTIONS":
-        return _handle_options_request()
+        return _handle_options_request(req)
     trace_id = trace_id_from_request(req, prefix="pipeline")
     started_at = time.perf_counter()
     # 1. Validation
@@ -1037,13 +1195,10 @@ async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestr
     if not file_bytes.startswith(b"%PDF"):
         return _cors_response("Invalid file type. Only PDF supported.", status_code=415)
 
-    content_disposition = req.headers.get("Content-Disposition", "")
-    match = re.search(r'filename="?([^";]+)"?', content_disposition)
-    filename = match.group(1) if match else f"{uuid.uuid4()}.pdf"
-    import urllib.parse
-    filename = urllib.parse.unquote(filename)
-    if not filename.lower().endswith(".pdf"):
-        filename += ".pdf"
+    try:
+        filename = _resolve_upload_filename(req)
+    except ValueError as exc:
+        return _cors_response(str(exc), status_code=400, req=req)
 
     try:
         duplicate = await _case_duplicate_preflight(filename)
@@ -1054,6 +1209,8 @@ async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestr
                 doc_id=duplicate.get("doc_id"),
                 matched_doc_id=duplicate.get("matched_doc_id"),
                 matched_by=duplicate.get("matched_by"),
+                data_source_id=duplicate.get("data_source_id"),
+                live_query=duplicate.get("live_query"),
             )
             log_metric("pipeline_duplicate_count", 1, doc_id=duplicate.get("doc_id"))
             logging.info(
@@ -1063,7 +1220,7 @@ async def start_pipeline_async(req: func.HttpRequest, client: df.DurableOrchestr
                 duplicate.get("matched_doc_id"),
                 duplicate.get("matched_by"),
             )
-            return _json_response(duplicate)
+            return _preflight_json_response(duplicate)
     except Exception as exc:
         log_event(
             "pipeline.preflight_failed",
@@ -1121,7 +1278,11 @@ async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpRespon
     raw_filename = req.params.get("filename") or req.params.get("doc_id") or ""
     filename = urllib.parse.unquote(raw_filename)
     if not filename:
-        return _cors_response("Missing query parameter: filename", status_code=400, req=req)
+        return _preflight_json_response(
+            {"status": "error", "error": "Missing query parameter: filename"},
+            status_code=400,
+            req=req,
+        )
 
     try:
         result = await _case_duplicate_preflight(filename)
@@ -1133,8 +1294,11 @@ async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpRespon
             status=result.get("status"),
             matched_doc_id=result.get("matched_doc_id"),
             matched_by=result.get("matched_by"),
+            data_source_id=result.get("data_source_id"),
+            live_query=result.get("live_query"),
+            warning=result.get("warning"),
         )
-        return _json_response(result, req=req)
+        return _preflight_json_response(result, req=req)
     except Exception as exc:
         doc_id = _doc_id_from_filename(filename)
         log_event(
@@ -1151,7 +1315,7 @@ async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpRespon
             exc,
             exc_info=True,
         )
-        return _json_response(
+        return _preflight_json_response(
             {
                 "status": "new",
                 "doc_id": doc_id,
@@ -1159,6 +1323,9 @@ async def pipeline_duplicate_preflight(req: func.HttpRequest) -> func.HttpRespon
                 "matched_by": "none",
                 "sample_node": None,
                 "cache_hit": False,
+                "cache_source": "none",
+                "live_query": False,
+                "data_source_id": None,
                 "trace_id": trace_id,
                 "warning": f"Preflight check error: {exc}",
             },
@@ -1262,6 +1429,7 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
     total_chunks = 0
     completed_chunks = 0
     current_batch = 0
+    blocked_chunks = 0
 
     if not context.is_replaying:
         log_event(
@@ -1354,6 +1522,9 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
             batch_result_payloads: List[Dict[str, Any]] = yield context.task_all(extraction_tasks)
             extraction_results.extend(batch_result_payloads)
             completed_chunks = len(extraction_results)
+            blocked_chunks = sum(
+                1 for item in extraction_results if item.get("outcome") == "content_blocked"
+            )
             context.set_custom_status(
                 _pipeline_status_payload(
                     phase="extracting",
@@ -1381,9 +1552,59 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
                 last_error=None,
             )
         )
-        merged_graph_path: str = yield context.call_activity(
-            "activity_merge_partials", extraction_results
+        merge_result: Dict[str, Any] = yield context.call_activity(
+            "activity_merge_partials",
+            {
+                "results": extraction_results,
+                "doc_id": doc_id,
+                "trace_id": trace_id,
+                "total_chunks": total_chunks,
+            },
         )
+
+        if merge_result.get("status") == "content_blocked":
+            if not context.is_replaying:
+                log_event(
+                    "pipeline.content_blocked",
+                    trace_id=trace_id,
+                    doc_id=doc_id,
+                    total_chunks=total_chunks,
+                    blocked_chunks=merge_result.get("blocked_chunks", blocked_chunks),
+                    coverage_ratio=merge_result.get("coverage_ratio", 0.0),
+                    manifest_path=merge_result.get("manifest_path"),
+                )
+                log_metric("pipeline_content_blocked_documents_count", 1, doc_id=doc_id)
+            context.set_custom_status(
+                _pipeline_status_payload(
+                    phase="content_blocked",
+                    message="All usable graph content was blocked by provider policy",
+                    blob_path=blob_path,
+                    doc_id=doc_id,
+                    trace_id=trace_id,
+                    total_chunks=total_chunks,
+                    completed_chunks=completed_chunks,
+                    current_batch=current_batch,
+                    last_error=None,
+                    blocked_chunks=merge_result.get("blocked_chunks", blocked_chunks),
+                    coverage_ratio=merge_result.get("coverage_ratio", 0.0),
+                    blocked_page_ranges=merge_result.get("blocked_page_ranges", []),
+                    manifest_path=merge_result.get("manifest_path"),
+                    review_required=True,
+                )
+            )
+            return {
+                "status": "content_blocked",
+                "blob_path": blob_path,
+                "final_graph_path": None,
+                "trace_id": trace_id,
+                "manifest_path": merge_result.get("manifest_path"),
+                "coverage_ratio": merge_result.get("coverage_ratio", 0.0),
+                "blocked_count": merge_result.get("blocked_chunks", blocked_chunks),
+                "blocked_page_ranges": merge_result.get("blocked_page_ranges", []),
+                "review_required": True,
+            }
+
+        merged_graph_path = merge_result["merged_graph_path"]
 
         context.set_custom_status(
             _pipeline_status_payload(
@@ -1404,12 +1625,12 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
 
         if not context.is_replaying:
             total_prompt_tokens = sum(
-                r.get("token_usage", {}).get("prompt_tokens", 0)
+                r.get("token_usage", {}).get("input_tokens", r.get("token_usage", {}).get("prompt_tokens", 0))
                 for r in extraction_results
                 if isinstance(r, dict)
             )
             total_completion_tokens = sum(
-                r.get("token_usage", {}).get("completion_tokens", 0)
+                r.get("token_usage", {}).get("output_tokens", r.get("token_usage", {}).get("completion_tokens", 0))
                 for r in extraction_results
                 if isinstance(r, dict)
             )
@@ -1426,6 +1647,9 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
                 total_tokens=total_tokens,
                 total_cost_usd=total_cost_usd,
                 chunks_processed_count=len(extraction_results),
+                blocked_chunks=merge_result.get("blocked_chunks", 0),
+                coverage_ratio=merge_result.get("coverage_ratio", 1.0),
+                is_partial=merge_result.get("is_partial", False),
             )
 
             log_event(
@@ -1439,14 +1663,26 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
             )
             log_metric("pipeline_success_count", 1, doc_id=doc_id)
             log_metric("pipeline_chunks_total", total_chunks, doc_id=doc_id)
+            log_metric(
+                "pipeline_ingestion_coverage_ratio",
+                merge_result.get("coverage_ratio", 1.0),
+                unit="ratio",
+                doc_id=doc_id,
+            )
+            if merge_result.get("is_partial"):
+                log_metric("pipeline_partial_documents_count", 1, doc_id=doc_id)
             logging.info(
                 f"[ORCHESTRATOR][COMPLETE] Pipeline finished. Final graph: {final_path}"
             )
 
         context.set_custom_status(
             _pipeline_status_payload(
-                phase="completed",
-                message="Pipeline completed",
+                phase=merge_result.get("status", "completed"),
+                message=(
+                    "Pipeline completed with excluded source ranges"
+                    if merge_result.get("is_partial")
+                    else "Pipeline completed"
+                ),
                 blob_path=blob_path,
                 doc_id=doc_id,
                 trace_id=trace_id,
@@ -1454,13 +1690,23 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
                 completed_chunks=completed_chunks,
                 current_batch=current_batch,
                 last_error=None,
+                blocked_chunks=merge_result.get("blocked_chunks", 0),
+                coverage_ratio=merge_result.get("coverage_ratio", 1.0),
+                blocked_page_ranges=merge_result.get("blocked_page_ranges", []),
+                manifest_path=merge_result.get("manifest_path"),
+                review_required=merge_result.get("review_required", False),
             )
         )
         return {
-            "status": "completed",
+            "status": merge_result.get("status", "completed"),
             "blob_path": blob_path,
             "final_graph_path": final_path,
             "trace_id": trace_id,
+            "manifest_path": merge_result.get("manifest_path"),
+            "coverage_ratio": merge_result.get("coverage_ratio", 1.0),
+            "blocked_count": merge_result.get("blocked_chunks", 0),
+            "blocked_page_ranges": merge_result.get("blocked_page_ranges", []),
+            "review_required": merge_result.get("review_required", False),
         }
     except Exception as exc:
         import traceback
@@ -1588,17 +1834,22 @@ async def activity_extract_chunk(chunk: Dict[str, Any]) -> Dict[str, Any]:
 
 @app.activity_trigger(input_name="extractions")
 async def activity_merge_partials(
-    extractions: List[Dict[str, Any]],
-) -> str:
+    extractions: Any,
+) -> Any:
     """Merges partial graphs. Input: List of extraction result dicts, Output: merged graph path (Claim-Check)."""
     if not extractions:
         logging.warning("[ACTIVITY][MERGE_PARTIALS] Received empty or None extractions. Skipping merge.")
         return None
 
     started_at = time.perf_counter()
-    doc_id = str((extractions[0] or {}).get("doc_id") or "unknown")
+    result_items = extractions.get("results", []) if isinstance(extractions, dict) else extractions
+    doc_id = str(
+        (extractions.get("doc_id") if isinstance(extractions, dict) else None)
+        or ((result_items[0] or {}).get("doc_id") if result_items else None)
+        or "unknown"
+    )
     logging.info(
-        f"[ACTIVITY][MERGE_PARTIALS][START] Merging {len(extractions)} results in-memory."
+        f"[ACTIVITY][MERGE_PARTIALS][START] Merging {len(result_items)} results in-memory."
     )
     try:
         merged_graph_path = await pipeline_activities.activity_merge_partials(
@@ -1608,7 +1859,7 @@ async def activity_merge_partials(
         log_event(
             "pipeline.merge.completed",
             doc_id=doc_id,
-            extraction_count=len(extractions),
+            extraction_count=len(result_items),
             merged_graph_path=merged_graph_path,
             duration_ms=elapsed_ms,
         )
@@ -1640,6 +1891,7 @@ async def activity_final_indexing(mergedGraphPath: str) -> str:
     try:
         final_path = await pipeline_activities.activity_final_indexing(mergedGraphPath)
         elapsed_ms = int((time.perf_counter() - started_at) * 1000)
+        coverage = _case_coverage_metadata(doc_id)
         log_event(
             "pipeline.final_indexing.completed",
             doc_id=doc_id,
@@ -1647,7 +1899,13 @@ async def activity_final_indexing(mergedGraphPath: str) -> str:
             final_graph_path=final_path,
             duration_ms=elapsed_ms,
         )
-        log_metric("pipeline_final_indexing_duration_ms", elapsed_ms, unit="ms", doc_id=doc_id)
+        log_metric(
+            "pipeline_final_indexing_duration_ms",
+            elapsed_ms,
+            unit="ms",
+            doc_id=doc_id,
+            is_partial=coverage.get("is_partial", False),
+        )
         logging.info(f"[ACTIVITY][FINAL_INDEXING][END] Final graph indexing complete: {final_path}")
         return final_path
     except Exception as e:
@@ -1834,10 +2092,28 @@ async def activity_query_investigation(queryInput: dict) -> dict:
     
     logging.info(f"[ACTIVITY][QUERY][START] doc_id: {doc_id} | question: {question[:50]}...")
     try:
+        coverage = _case_coverage_metadata(doc_id)
+        agent_question = question
+        if coverage.get("is_partial"):
+            agent_question = (
+                f"{question}\n\n"
+                "COVERAGE CONSTRAINT: Some source page ranges were excluded by provider policy. "
+                "Answer only from processed evidence. Never state or imply that an entity, "
+                "relationship, offense, or fact is absent from the entire document; qualify any "
+                "non-finding as applying only to processed ranges."
+            )
         async with QueryAgent(doc_id=doc_id, stateless=True) as agent:
-            result_state = await agent.answer_question_stateless(question, state_dict, trace_id=trace_id, autonomous_mode=autonomous_mode)
+            result_state = await agent.answer_question_stateless(
+                agent_question,
+                state_dict,
+                trace_id=trace_id,
+                autonomous_mode=autonomous_mode,
+            )
             elapsed_ms = int((time.perf_counter() - started_at) * 1000)
             answer = result_state.get("final_answer")
+            if coverage.get("is_partial"):
+                answer = f"{_partial_coverage_notice(coverage)}\n\n{answer or ''}".strip()
+                result_state["final_answer"] = answer
             log_event(
                 "query.completed",
                 trace_id=trace_id,
@@ -1852,6 +2128,7 @@ async def activity_query_investigation(queryInput: dict) -> dict:
                 "state": result_state,
                 "answer": answer,
                 "trace_id": trace_id,
+                "coverage": coverage,
             }
             json.dumps(payload, ensure_ascii=False)
             return payload

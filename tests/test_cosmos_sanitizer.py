@@ -1,10 +1,37 @@
 import pytest
 from unittest.mock import AsyncMock
-from src.graph.cosmos_manager import CosmosGremlinManager
+from src.graph.cosmos_manager import (
+    CosmosGremlinManager,
+    cosmos_data_source_identity,
+    duplicate_lookup_query,
+)
 
 
 def _manager() -> CosmosGremlinManager:
     return object.__new__(CosmosGremlinManager)
+
+
+def test_cosmos_identity_is_stable_and_credential_free():
+    first = cosmos_data_source_identity(
+        "wss://Example.gremlin.cosmos.azure.com:443/", "graph-db", "case-graph"
+    )
+    second = cosmos_data_source_identity(
+        "example.gremlin.cosmos.azure.com", "graph-db", "case-graph"
+    )
+
+    assert first == second
+    assert first["host"] == "example.gremlin.cosmos.azure.com"
+    assert first["data_source_id"].startswith("cosmos-")
+    assert "key" not in first
+
+
+def test_duplicate_lookup_query_is_allowlisted_and_projects_match_value():
+    query = duplicate_lookup_query("pk")
+    assert "requested_doc_id" in query
+    assert "matched_value" in query
+
+    with pytest.raises(ValueError, match="Unsupported duplicate match property"):
+        duplicate_lookup_query("untrusted-property")
 
 
 def test_node_sanitizer_compacts_investigative_metadata():
@@ -164,8 +191,9 @@ async def test_sync_graph_connected_component_filtering():
     # Component 2 (size 2): node_d, node_e
     # Component 3 (size 1): node_f (isolated)
     graph_data = {
+        "metadata": {"doc_id": "sample_page_1"},
         "nodes": [
-            {"id": "node_a", "type": "Entity"},
+            {"id": "node_a", "type": "Entity", "pk": "stale-uuid"},
             {"id": "node_b", "type": "Entity"},
             {"id": "node_c", "type": "Entity"},
             {"id": "node_d", "type": "Entity"},
@@ -184,7 +212,27 @@ async def test_sync_graph_connected_component_filtering():
     # Assert upsert_node was called ONLY for component 1 (node_a, node_b, node_c)
     called_node_ids = {args[0]["id"] for args, kwargs in manager.upsert_node.call_args_list}
     assert called_node_ids == {"node_a", "node_b", "node_c"}
+    assert all(
+        args[0]["pk"] == "sample_page_1"
+        and args[0]["source_file"] == "sample_page_1"
+        for args, kwargs in manager.upsert_node.call_args_list
+    )
     
     # Assert upsert_edge was called ONLY for component 1 edges (rel_1, rel_2)
     called_edges = {(args[0]["source"], args[0]["target"]) for args, kwargs in manager.upsert_edge.call_args_list}
     assert called_edges == {("node_a", "node_b"), ("node_b", "node_c")}
+    assert all(
+        args[0]["pk"] == "sample_page_1"
+        and args[0]["source_file"] == "sample_page_1"
+        for args, kwargs in manager.upsert_edge.call_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_sync_graph_requires_authoritative_doc_id():
+    manager = _manager()
+    manager.upsert_node = AsyncMock()
+    manager.upsert_edge = AsyncMock()
+
+    with pytest.raises(ValueError, match="metadata doc_id is required"):
+        await manager.sync_graph({"nodes": [], "edges": []})
