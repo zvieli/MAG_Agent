@@ -3,7 +3,7 @@
   "solution": {
     "name": "mag-spfx-client-side-solution",
     "id": "b071a1d2-aa81-47ac-9849-768c2e54f213",
-    "version": "0.1.2.0",
+    "version": "0.1.3.0",
     "includeClientSideAssets": true,
     "skipFeatureDeployment": true,
     "isDomainIsolated": false,

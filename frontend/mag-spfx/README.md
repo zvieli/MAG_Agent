@@ -58,7 +58,7 @@ x-mag-trace-id: <client-generated-trace-id>
 
 ## Production Entra Authentication
 
-The SPFx token provider must receive the bare backend client ID, not an App ID URI, delegated scope, or `/.default` value. A shared authentication boundary obtains complete request headers for pipeline, graph, report, timeline, and chat calls. For every non-loopback API URL, token acquisition failures stop the request before `fetch` or XHR and surface a sanitized security error in the console and UI; the client never retries without a Bearer token. Exact `localhost`, `127.0.0.1`, and `::1` URLs retain function-key-only local compatibility.
+The SPFx token provider must receive the bare backend client ID, not an App ID URI, delegated scope, or `/.default` value. A shared authentication boundary owns the actual `fetch` and XHR transports for pipeline, graph, report, timeline, and chat calls. For every non-loopback API URL, token acquisition and a final Bearer-header assertion complete before the native network primitive is invoked; failures surface a sanitized security error in the console and UI. Exact HTTP(S) `localhost`, `127.0.0.1`, and `::1` URLs retain function-key-only local compatibility.
 
 Configure the Function App with the authentication settings already used by the repository's `.env`:
 
@@ -73,7 +73,9 @@ The backend requires the fixed delegated scope `user_impersonation`; it is not a
 
 Before deployment, DevOps must confirm that the backend registration exposes delegated scope `user_impersonation`, that its client ID and Application ID URI match the values above, and that admin consent was granted to the actual SPFx calling service principal. This staged package intentionally has no `webApiPermissionRequests` entry. If the bare-client-ID request still fails after that consent, add a request whose `resource` is the backend App Registration's exact Entra **display name**, redeploy, and approve it in SharePoint API Access. Never place a GUID in `resource`.
 
-For live acceptance, use the deployed SharePoint package and verify that `pipeline-preflight` contains a Bearer token and returns 200, then exercise upload, orchestration polling, graph/report loading, and chat. A request without a token must continue to return 401. Localhost workbench certificate/loopback failures are tracked separately.
+The Function code owns JWT validation. Configure [App Service Authentication](https://learn.microsoft.com/azure/app-service/overview-authentication-authorization#authorization-behavior) to allow unauthenticated requests through to the Function and keep `REQUIRE_ENTRA_AUTH=true`; this prevents Easy Auth from returning an empty platform 401 before `@require_token_auth` runs. The application-level 401 contains a JSON body, while an empty 401 with `WWW-Authenticate` indicates that the platform gate is still intercepting the request.
+
+For live acceptance, use the deployed SharePoint package and first verify the console fingerprint reports component version `0.1.3` and the new hashed bundle asset. Verify that `pipeline-preflight` contains a Bearer token and returns 200, then exercise upload, orchestration polling, graph/report loading, and chat. Force token acquisition to fail once and confirm that no backend request is created. A manual request without a token must continue to return the application JSON 401. Localhost workbench certificate/loopback failures are tracked separately.
 
 ## Quality & Type Checks
 
@@ -81,6 +83,7 @@ For live acceptance, use the deployed SharePoint package and verify that `pipeli
 ./node_modules/.bin/tsc --noEmit
 npm run test:auth
 npm run build
-npm run bundle -- --ship
-npm run package-solution -- --ship
+npm run package:ship
 ```
+
+`package:ship` cleans generated assets before bundling so an older hashed bundle cannot be carried into the new `.sppkg`.

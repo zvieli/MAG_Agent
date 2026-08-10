@@ -149,16 +149,10 @@ export class GraphService implements IGraphService {
       return params.toString() ? `?${params.toString()}` : '';
     };
 
-    const requestUrl = apiUrl(
-      this.apiBaseUrl,
-      `/api/cases/${encodeURIComponent(query.docId)}/graph${graphSuffix(query.docId)}`
-    );
-    const headers = await this.backendAuth.getHeaders({ operation: 'graph-load', url: requestUrl });
-
-    const fetchGraph = async (docId: string, partitionKey: string): Promise<GraphQueryResult> =>
-      fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/graph${graphSuffix(partitionKey)}`), {
-        headers
-      }).then(readJson<GraphQueryResult>);
+    const fetchGraph = async (docId: string, partitionKey: string): Promise<GraphQueryResult> => {
+      const url = apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/graph${graphSuffix(partitionKey)}`);
+      return this.backendAuth.fetch({ operation: 'graph-load', url }).then(readJson<GraphQueryResult>);
+    };
 
     let result = await fetchGraph(query.docId, query.docId);
     const legacyDocId = legacyEncodedDocId(query.docId);
@@ -194,16 +188,10 @@ export class GraphService implements IGraphService {
       return params.toString() ? `?${params.toString()}` : '';
     };
 
-    const requestUrl = apiUrl(
-      this.apiBaseUrl,
-      `/api/cases/${encodeURIComponent(query.docId)}/timeline${timelineSuffix(query.docId)}`
-    );
-    const headers = await this.backendAuth.getHeaders({ operation: 'timeline-load', url: requestUrl });
-
-    const fetchTimelineGraph = async (docId: string, partitionKey: string): Promise<GraphQueryResult> =>
-      fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/timeline${timelineSuffix(partitionKey)}`), {
-        headers
-      }).then(readJson<GraphQueryResult>);
+    const fetchTimelineGraph = async (docId: string, partitionKey: string): Promise<GraphQueryResult> => {
+      const url = apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/timeline${timelineSuffix(partitionKey)}`);
+      return this.backendAuth.fetch({ operation: 'timeline-load', url }).then(readJson<GraphQueryResult>);
+    };
 
     let result = await fetchTimelineGraph(query.docId, query.docId);
     const legacyDocId = legacyEncodedDocId(query.docId);

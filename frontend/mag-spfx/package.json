@@ -1,6 +1,6 @@
 {
   "name": "mag-spfx",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "private": true,
   "engines": {
     "node": ">=22.0.0 <23.0.0"
@@ -9,6 +9,7 @@
     "build": "gulp build",
     "bundle": "gulp bundle",
     "dev": "gulp serve-deprecated",
+    "package:ship": "gulp clean && gulp bundle --ship && gulp package-solution --ship",
     "package-solution": "gulp package-solution",
     "test:auth": "tsc -p tsconfig.auth-tests.json && jest --runInBand --config test/jest.config.js",
     "serve": "gulp serve-deprecated",

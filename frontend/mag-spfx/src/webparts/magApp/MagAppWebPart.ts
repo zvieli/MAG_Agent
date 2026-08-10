@@ -28,6 +28,26 @@ export interface IMagAppWebPartProps {
 }
 
 export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartProps> {
+  protected async onInit(): Promise<void> {
+    await super.onInit();
+
+    const bundleAsset = window.performance?.getEntriesByType('resource')
+      .map((entry) => {
+        try {
+          return new URL(entry.name).pathname.split('/').pop();
+        } catch {
+          return undefined;
+        }
+      })
+      .find((name) => Boolean(name && /^mag-app-web-part_[0-9a-f]+\.js$/i.test(name)));
+
+    console.info('[MAG] SPFx runtime fingerprint', {
+      componentId: this.manifest.id.toString(),
+      componentVersion: this.manifest.version,
+      bundleAsset: bundleAsset || 'unavailable'
+    });
+  }
+
   public render(): void {
     let isLocalDocker = false;
     let envApiTarget: string | undefined = undefined;

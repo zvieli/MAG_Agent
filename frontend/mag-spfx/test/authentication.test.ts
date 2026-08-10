@@ -96,11 +96,10 @@ describe('SPFx Entra authentication', () => {
 
     expect(fetchSpy).toHaveBeenCalledTimes(1);
     const options = fetchSpy.mock.calls[0][1] as RequestInit;
-    expect(options.headers).toMatchObject({
-      Authorization: 'Bearer access-token',
-      'x-functions-key': 'function-key',
-      'x-mag-trace-id': 'trace-1'
-    });
+    const headers = options.headers as Headers;
+    expect(headers.get('Authorization')).toBe('Bearer access-token');
+    expect(headers.get('x-functions-key')).toBe('function-key');
+    expect(headers.get('x-mag-trace-id')).toBe('trace-1');
   });
 
   it.each([
@@ -156,7 +155,7 @@ describe('SPFx Entra authentication', () => {
     const authError = new EntraAuthenticationError({ reason: 'token-acquisition-failed' });
     const backendAuth = {
       mode: 'entra',
-      getHeaders: jest.fn().mockRejectedValue(authError)
+      fetch: jest.fn().mockRejectedValue(authError)
     } as unknown as BackendAuthService;
     const fetchSpy = jest.fn();
     window.fetch = fetchSpy;
@@ -183,16 +182,19 @@ describe('SPFx Entra authentication', () => {
   ])('allows function-key-only compatibility for loopback URL %s', async (url) => {
     const getAccessToken = jest.fn().mockRejectedValue(new Error('must not be called'));
     const backendAuth = new BackendAuthService(url, 'local-key', tokenServiceWith(getAccessToken), logger);
+    const fetchSpy = jest.fn().mockResolvedValue({ ok: true });
+    window.fetch = fetchSpy;
 
-    await expect(backendAuth.getHeaders(
+    await expect(backendAuth.fetch(
       { operation: 'local-test', url: `${url}/api/ping` },
-      { 'x-mag-trace-id': 'local-trace' }
-    )).resolves.toEqual({
-      'x-functions-key': 'local-key',
-      'x-mag-trace-id': 'local-trace'
-    });
+      { headers: { 'x-mag-trace-id': 'local-trace' } }
+    )).resolves.toMatchObject({ ok: true });
     expect(getAccessToken).not.toHaveBeenCalled();
     expect(isLoopbackApiUrl(url)).toBe(true);
+    const headers = fetchSpy.mock.calls[0][1].headers as Headers;
+    expect(headers.get('Authorization')).toBeNull();
+    expect(headers.get('x-functions-key')).toBe('local-key');
+    expect(headers.get('x-mag-trace-id')).toBe('local-trace');
   });
 
   it('does not extend loopback compatibility to an external status URL', async () => {
@@ -203,18 +205,102 @@ describe('SPFx Entra authentication', () => {
       tokenServiceWith(getAccessToken),
       logger
     );
+    const fetchSpy = jest.fn().mockResolvedValue({ ok: true });
+    window.fetch = fetchSpy;
 
-    await expect(backendAuth.getHeaders({
+    await expect(backendAuth.fetch({
       operation: 'external-status-test',
       url: 'https://function.example/api/status'
-    })).resolves.toMatchObject({ Authorization: 'Bearer external-token' });
+    })).resolves.toMatchObject({ ok: true });
     expect(getAccessToken).toHaveBeenCalledTimes(1);
+    const headers = fetchSpy.mock.calls[0][1].headers as Headers;
+    expect(headers.get('Authorization')).toBe('Bearer external-token');
   });
 
-  it('treats invalid and non-loopback URLs as cloud authentication mode', () => {
+  it.each([
+    'not-a-url',
+    'https://localhost.example',
+    'https://127.0.0.1.example',
+    'https://localhost@function.example/api/ping',
+    'https://function.azurewebsites.net',
+    'file://localhost/tmp/api'
+  ])('treats %s as a cloud-protected URL', (url) => {
     const tokenService = tokenServiceWith(jest.fn());
-    expect(new BackendAuthService('not-a-url', '', tokenService, logger).mode).toBe('entra');
-    expect(new BackendAuthService('https://localhost.example', '', tokenService, logger).mode).toBe('entra');
+    expect(new BackendAuthService(url, '', tokenService, logger).mode).toBe('entra');
+    expect(isLoopbackApiUrl(url)).toBe(false);
+  });
+
+  it('does not allow a caller-supplied Authorization header to bypass token acquisition', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const authError = new EntraAuthenticationError({ reason: 'token-acquisition-failed' });
+    const backendAuth = new BackendAuthService(
+      cloudUrl,
+      'function-key',
+      tokenServiceWith(jest.fn().mockRejectedValue(authError)),
+      logger
+    );
+    const fetchSpy = jest.fn();
+    window.fetch = fetchSpy;
+
+    await expect(backendAuth.fetch(
+      { operation: 'caller-authorization-test', url: `${cloudUrl}/api/ping` },
+      { headers: { authorization: 'Bearer caller-supplied-token' } }
+    )).rejects.toBe(authError);
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it('does not construct or open an XHR when cloud token acquisition fails', async () => {
+    jest.spyOn(console, 'error').mockImplementation(() => undefined);
+    const authError = new EntraAuthenticationError({ reason: 'token-acquisition-failed' });
+    const backendAuth = new BackendAuthService(
+      cloudUrl,
+      'function-key',
+      tokenServiceWith(jest.fn().mockRejectedValue(authError)),
+      logger
+    );
+    const originalXhr = window.XMLHttpRequest;
+    const xhrConstructor = jest.fn();
+    (window as any).XMLHttpRequest = xhrConstructor;
+
+    try {
+      await expect(backendAuth.openAuthenticatedXhr(
+        { operation: 'pipeline-start', url: `${cloudUrl}/api/pipelines` },
+        'POST'
+      )).rejects.toBe(authError);
+      expect(xhrConstructor).not.toHaveBeenCalled();
+    } finally {
+      window.XMLHttpRequest = originalXhr;
+    }
+  });
+
+  it('opens cloud XHR only after applying Entra and operational headers', async () => {
+    const backendAuth = new BackendAuthService(
+      cloudUrl,
+      'function-key',
+      tokenServiceWith(jest.fn().mockResolvedValue('xhr-access-token')),
+      logger
+    );
+    const originalXhr = window.XMLHttpRequest;
+    const open = jest.fn();
+    const setRequestHeader = jest.fn();
+    const xhr = { open, setRequestHeader } as unknown as XMLHttpRequest;
+    const xhrConstructor = jest.fn(() => xhr);
+    (window as any).XMLHttpRequest = xhrConstructor;
+
+    try {
+      await expect(backendAuth.openAuthenticatedXhr(
+        { operation: 'pipeline-start', url: `${cloudUrl}/api/pipelines` },
+        'POST',
+        { 'x-mag-trace-id': 'trace-xhr' }
+      )).resolves.toBe(xhr);
+      expect(xhrConstructor).toHaveBeenCalledTimes(1);
+      expect(open).toHaveBeenCalledWith('POST', `${cloudUrl}/api/pipelines`);
+      expect(setRequestHeader).toHaveBeenCalledWith('authorization', 'Bearer xhr-access-token');
+      expect(setRequestHeader).toHaveBeenCalledWith('x-functions-key', 'function-key');
+      expect(setRequestHeader).toHaveBeenCalledWith('x-mag-trace-id', 'trace-xhr');
+    } finally {
+      window.XMLHttpRequest = originalXhr;
+    }
   });
 
   it('logs and displays only sanitized authentication diagnostics', async () => {
@@ -229,7 +315,7 @@ describe('SPFx Entra authentication', () => {
 
     let caught: unknown;
     try {
-      await backendAuth.getHeaders({ operation: 'security-test', url: `${cloudUrl}/api/ping` });
+      await backendAuth.fetch({ operation: 'security-test', url: `${cloudUrl}/api/ping` });
     } catch (error) {
       caught = error;
     }

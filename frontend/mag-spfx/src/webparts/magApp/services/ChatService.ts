@@ -44,18 +44,17 @@ export class ChatService implements IChatService {
       questionPreview: question.slice(0, 120)
     });
 
-    const headers = await this.backendAuth.getHeaders(
+    const start = await this.backendAuth.fetch(
       { operation: 'query-start', url },
       {
-        'Content-Type': 'application/json',
-        'x-mag-trace-id': traceId
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-mag-trace-id': traceId
+        },
+        body: JSON.stringify({ doc_id: docId, question, state })
       }
-    );
-    const start = await fetch(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ doc_id: docId, question, state })
-    }).then((response) =>
+    ).then((response) =>
       readJson<DurableStartResponse>(response, {
         logger: this.logger,
         traceId,
@@ -107,13 +106,10 @@ export class ChatService implements IChatService {
       statusUrl
     });
 
-    const headers = await this.backendAuth.getHeaders(
+    const status = await this.backendAuth.fetch(
       { operation: 'query-status', url: statusUrl },
-      { 'x-mag-trace-id': pollTraceId }
-    );
-    const status = await fetch(statusUrl, {
-      headers
-    }).then((response) =>
+      { headers: { 'x-mag-trace-id': pollTraceId } }
+    ).then((response) =>
       readJson<DurableStatus<ChatAnswer>>(response, {
         logger: this.logger,
         traceId: pollTraceId,

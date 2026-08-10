@@ -50,23 +50,16 @@ export class PipelineService implements IPipelineService {
     fileName: string
   ): Promise<PipelinePreflightResult> {
     try {
-      const headers = await this.backendAuth.getHeaders(
+      const preflight = await this.backendAuth.fetch(
         { operation: 'pipeline-preflight', url: preflightUrl },
         {
-          'Cache-Control': 'no-cache',
-          'x-mag-trace-id': traceId
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache',
+            'x-mag-trace-id': traceId
+          }
         }
-      );
-      this.logger.info('Pipeline duplicate preflight sending', {
-        traceId,
-        url: preflightUrl,
-        authMode: this.backendAuth.mode,
-        hasBearerToken: Boolean(headers.Authorization)
-      });
-      const preflight = await fetch(preflightUrl, {
-        cache: 'no-store',
-        headers
-      }).then((response) =>
+      ).then((response) =>
         readJson<PipelinePreflightResult>(response, {
           logger: this.logger,
           traceId,
@@ -107,18 +100,16 @@ export class PipelineService implements IPipelineService {
   private uploadWithProgress(
     url: string,
     file: File,
-    headers: Record<string, string>,
+    extraHeaders: HeadersInit,
     traceId: string,
     startedAtMs: number,
     onProgress: ((operation: PipelineOperation) => void) | undefined
   ): Promise<DurableStartResponse> {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', url);
-
-      Object.keys(headers).forEach((key) => {
-        xhr.setRequestHeader(key, headers[key]);
-      });
+    return this.backendAuth.openAuthenticatedXhr(
+      { operation: 'pipeline-start', url },
+      'POST',
+      extraHeaders
+    ).then((xhr) => new Promise((resolve, reject) => {
 
       xhr.upload.onprogress = (event: ProgressEvent<EventTarget>) => {
         if (!event.lengthComputable) return;
@@ -152,7 +143,7 @@ export class PipelineService implements IPipelineService {
       };
 
       xhr.send(file);
-    });
+    }));
   }
 
   public async uploadAndStart(file: File, onProgress?: (operation: PipelineOperation) => void): Promise<PipelineOperation> {
@@ -255,22 +246,19 @@ export class PipelineService implements IPipelineService {
       onProgress
     );
 
-    const headers = await this.backendAuth.getHeaders(
-      { operation: 'pipeline-start', url },
+    const start = await this.uploadWithProgress(
+      url,
+      file,
       {
         'Content-Disposition': `attachment; filename="${encodeURIComponent(file.name)}"`,
         'Content-Type': 'application/pdf',
         'x-mag-file-name': encodeURIComponent(file.name),
         'x-mag-trace-id': traceId
-      }
-    );
-    this.logger.info('Pipeline start sending', {
+      },
       traceId,
-      url,
-      authMode: this.backendAuth.mode,
-      hasBearerToken: Boolean(headers.Authorization)
-    });
-    const start = await this.uploadWithProgress(url, file, headers, traceId, startedAtMs, onProgress);
+      startedAtMs,
+      onProgress
+    );
 
     const duplicateStart = start as DurableStartResponse & PipelinePreflightResult;
     if (duplicateStart.status === 'duplicate' && duplicateStart.matched_doc_id) {
@@ -352,13 +340,10 @@ export class PipelineService implements IPipelineService {
       statusUrl: operation.statusUrl
     });
 
-    const headers = await this.backendAuth.getHeaders(
+    const status = await this.backendAuth.fetch(
       { operation: 'pipeline-status', url: operation.statusUrl },
-      { 'x-mag-trace-id': traceId }
-    );
-    const status = await fetch(operation.statusUrl, {
-      headers
-    }).then((response) =>
+      { headers: { 'x-mag-trace-id': traceId } }
+    ).then((response) =>
       readJson<DurableStatus<PipelineOutput>>(response, {
         logger: this.logger,
         traceId,

@@ -41,7 +41,15 @@ const targetHostname = (url: string): string | undefined => {
 };
 
 export const isLoopbackApiUrl = (apiBaseUrl: string): boolean => {
-  const hostname = targetHostname(apiBaseUrl);
+  let parsed: URL;
+  try {
+    parsed = new URL(apiBaseUrl);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  const hostname = parsed.hostname.toLowerCase();
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' || hostname === '::1';
 };
 
@@ -84,38 +92,87 @@ export class BackendAuthService {
     return authenticationError;
   }
 
-  public async getHeaders(
+  private requestMode(url: string): BackendAuthMode {
+    return isLoopbackApiUrl(url) ? 'loopback' : 'entra';
+  }
+
+  private assertRequestIsAuthorized(
+    context: BackendRequestContext,
+    mode: BackendAuthMode,
+    headers: Headers
+  ): void {
+    if (mode === 'loopback') return;
+
+    const authorization = headers.get('Authorization')?.trim();
+    if (!authorization || !/^Bearer\s+\S+$/i.test(authorization)) {
+      throw this.authenticationFailure(undefined, context, 'missing-bearer-before-send');
+    }
+  }
+
+  private async buildHeaders(
     context: BackendRequestContext,
     extraHeaders?: HeadersInit
-  ): Promise<Record<string, string>> {
-    const headers: Record<string, string> = {};
-    mergeHeaders(headers, extraHeaders);
+  ): Promise<{ headers: Headers; mode: BackendAuthMode }> {
+    const headers = new Headers();
+    const callerHeaders: Record<string, string> = {};
+    mergeHeaders(callerHeaders, extraHeaders);
+    Object.keys(callerHeaders).forEach((key) => headers.set(key, callerHeaders[key]));
+    headers.delete('Authorization');
+
+    const mode = this.requestMode(context.url);
+
+    if (mode === 'entra') {
+      if (!this.tokenService) {
+        throw this.authenticationFailure(undefined, context, 'missing-token-service');
+      }
+
+      try {
+        const token = await this.tokenService.getAccessToken();
+        if (!token || !token.trim()) {
+          throw new EntraAuthenticationError({ reason: 'empty-token' });
+        }
+        headers.set('Authorization', `Bearer ${token.trim()}`);
+      } catch (error) {
+        throw this.authenticationFailure(error, context, 'token-acquisition-failed');
+      }
+    }
 
     const normalizedFunctionKey = this.functionKey?.trim();
-    if (normalizedFunctionKey) {
-      headers['x-functions-key'] = normalizedFunctionKey;
-    }
+    if (normalizedFunctionKey) headers.set('x-functions-key', normalizedFunctionKey);
 
-    const requestMode: BackendAuthMode =
-      this.mode === 'loopback' && isLoopbackApiUrl(context.url) ? 'loopback' : 'entra';
-    if (requestMode === 'loopback') {
-      return headers;
-    }
+    this.assertRequestIsAuthorized(context, mode, headers);
+    return { headers, mode };
+  }
 
-    if (!this.tokenService) {
-      throw this.authenticationFailure(undefined, context, 'missing-token-service');
-    }
+  private logAuthorizedRequest(context: BackendRequestContext, mode: BackendAuthMode, headers: Headers): void {
+    this.logger?.info('Backend request authorized for transport', {
+      operation: context.operation,
+      targetHost: targetHostname(context.url) || 'invalid-url',
+      authMode: mode,
+      hasBearerToken: Boolean(headers.get('Authorization'))
+    });
+  }
 
-    try {
-      const token = await this.tokenService.getAccessToken();
-      if (!token || !token.trim()) {
-        throw new EntraAuthenticationError({ reason: 'empty-token' });
-      }
-      headers.Authorization = `Bearer ${token.trim()}`;
-      return headers;
-    } catch (error) {
-      throw this.authenticationFailure(error, context, 'token-acquisition-failed');
-    }
+  public async fetch(context: BackendRequestContext, init: RequestInit = {}): Promise<Response> {
+    const { headers, mode } = await this.buildHeaders(context, init.headers);
+    this.assertRequestIsAuthorized(context, mode, headers);
+    this.logAuthorizedRequest(context, mode, headers);
+    return window.fetch(context.url, { ...init, headers });
+  }
+
+  public async openAuthenticatedXhr(
+    context: BackendRequestContext,
+    method: string,
+    extraHeaders?: HeadersInit
+  ): Promise<XMLHttpRequest> {
+    const { headers, mode } = await this.buildHeaders(context, extraHeaders);
+    this.assertRequestIsAuthorized(context, mode, headers);
+
+    const xhr = new XMLHttpRequest();
+    xhr.open(method, context.url);
+    headers.forEach((value, key) => xhr.setRequestHeader(key, value));
+    this.logAuthorizedRequest(context, mode, headers);
+    return xhr;
   }
 }
 

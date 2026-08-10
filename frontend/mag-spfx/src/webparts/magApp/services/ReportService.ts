@@ -30,10 +30,7 @@ export class ReportService implements IReportService {
 
     try {
       const url = apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/report`);
-      const headers = await this.backendAuth.getHeaders({ operation: 'report-load', url });
-      const result = await fetch(url, {
-        headers
-      }).then(readJson<ReportResult>);
+      const result = await this.backendAuth.fetch({ operation: 'report-load', url }).then(readJson<ReportResult>);
       await browserCache.set(cacheKey, result, reportTtlMs);
       return { ...result, cache: { fromCache: false } };
     } catch (err) {
@@ -63,10 +60,7 @@ export class ReportService implements IReportService {
 
     try {
       const url = apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/communities`);
-      const headers = await this.backendAuth.getHeaders({ operation: 'community-summaries-load', url });
-      const result = await fetch(url, {
-        headers
-      }).then(readJson<CommunitySummariesResult>);
+      const result = await this.backendAuth.fetch({ operation: 'community-summaries-load', url }).then(readJson<CommunitySummariesResult>);
       await browserCache.set(cacheKey, result, reportTtlMs);
       return { ...result, cache: { fromCache: false } };
     } catch (err) {
@@ -97,10 +91,7 @@ export class ReportService implements IReportService {
 
     try {
       const url = apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness`);
-      const headers = await this.backendAuth.getHeaders({ operation: 'protocol-completeness-load', url });
-      const result = await fetch(url, {
-        headers
-      }).then(readJson<ProtocolCompletenessResult>);
+      const result = await this.backendAuth.fetch({ operation: 'protocol-completeness-load', url }).then(readJson<ProtocolCompletenessResult>);
       await browserCache.set(cacheKey, result, reportTtlMs);
       return { ...result, cache: { fromCache: false } };
     } catch (err) {
@@ -119,11 +110,10 @@ export class ReportService implements IReportService {
 
   public async verifyProtocolCompletenessWithAgent(docId: string): Promise<string> {
     const url = apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness/verify`);
-    const headers = await this.backendAuth.getHeaders({ operation: 'protocol-completeness-verify', url });
-    const response = await fetch(url, {
-      method: 'POST',
-      headers
-    });
+    const response = await this.backendAuth.fetch(
+      { operation: 'protocol-completeness-verify', url },
+      { method: 'POST' }
+    );
     if (!response.ok) {
       throw new Error(`Verification request failed: ${response.statusText}`);
     }
@@ -133,10 +123,7 @@ export class ReportService implements IReportService {
   }
 
   public async checkVerificationStatus(statusUrl: string): Promise<{ runtimeStatus: string }> {
-    const headers = await this.backendAuth.getHeaders({ operation: 'protocol-verification-status', url: statusUrl });
-    const response = await fetch(statusUrl, {
-      headers
-    });
+    const response = await this.backendAuth.fetch({ operation: 'protocol-verification-status', url: statusUrl });
     if (!response.ok) {
       throw new Error(`Status query failed: ${response.statusText}`);
     }
