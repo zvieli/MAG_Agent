@@ -1,4 +1,5 @@
 import { requestErrorText } from '../src/webparts/magApp/domain/localization';
+import { findMagAppBundleAsset } from '../src/webparts/magApp/domain/runtimeFingerprint';
 import { BackendAuthService, isLoopbackApiUrl } from '../src/webparts/magApp/services/BackendAuthService';
 import { ChatService } from '../src/webparts/magApp/services/ChatService';
 import { GraphService } from '../src/webparts/magApp/services/GraphService';
@@ -50,6 +51,20 @@ describe('SPFx Entra authentication', () => {
   afterEach(() => {
     window.fetch = originalFetch;
     jest.restoreAllMocks();
+  });
+
+  it('fingerprints the most recently loaded debug or ship bundle', () => {
+    expect(findMagAppBundleAsset([
+      'https://publiccdn.sharepointonline.com/mag-app-web-part_66834f419d1079b546ad.js',
+      'https://localhost:4321/dist/mag-app-web-part.js'
+    ])).toBe('mag-app-web-part.js');
+    expect(findMagAppBundleAsset([
+      'https://publiccdn.sharepointonline.com/mag-app-web-part_eadc7fc94fd4022de255.js'
+    ])).toBe('mag-app-web-part_eadc7fc94fd4022de255.js');
+    expect(findMagAppBundleAsset([
+      'https://localhost:4321/dist/mag-app-web-part.js.map',
+      'not-a-url'
+    ])).toBeUndefined();
   });
 
   it('passes the bare backend client ID unchanged to getToken', async () => {

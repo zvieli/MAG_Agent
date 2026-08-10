@@ -20,6 +20,13 @@ npm run trust-cert
 npm run serve
 ```
 
+`serve` performs the debug build itself; do not run a separate `gulp bundle`
+before it. With current Chrome versions, grant the SharePoint origin the site
+permission named **Loopback network** or **Local network access** so the hosted
+workbench can load assets from `localhost`. If the permission is managed or hidden,
+use an unmanaged development profile or request the corresponding enterprise-policy
+allowlist from IT rather than disabling browser security.
+
 The SPFx local dev server serves manifests from:
 
 ```text
@@ -74,7 +81,15 @@ The package requests `user_impersonation` from the backend resource display name
 
 Easy Auth owns issuer, tenant, audience, signature, and calling-client validation. The Function reads its trusted `X-MS-CLIENT-PRINCIPAL` header and enforces `user_impersonation`. Configure Easy Auth to require authentication with a `401` response, exclude only `/api/ping`, and allowlist the tenant's SharePoint Online Client Extensibility application. See the repository [deployment runbook](../../EASY_AUTH_DEPLOYMENT.md).
 
-For live acceptance, use the deployed SharePoint package and first verify the console fingerprint reports component version `0.1.4` and the new hashed bundle asset. Verify that `pipeline-preflight` contains a Bearer token and returns 200, then exercise upload, orchestration polling, graph/report loading, and chat. Force token acquisition to fail once and confirm that no backend request is created. A manual request without a token must return Easy Auth `401`; a valid token without the delegated scope must return application JSON `403`.
+For local acceptance, verify that `temp/build/manifests.js` reports component version
+`0.1.5`, that `dist/mag-app-web-part.js` loads from `https://localhost:4321`, and
+that the console runtime fingerprint reports both values. For live acceptance, use
+the deployed SharePoint package and verify the fingerprint reports component version
+`0.1.5` and bundle `mag-app-web-part_eadc7fc94fd4022de255.js`. Verify that `pipeline-preflight`
+contains a Bearer token and returns 200, then exercise upload, orchestration polling,
+graph/report loading, and chat. Force token acquisition to fail once and confirm that
+no backend request is created. A manual request without a token must return Easy Auth
+`401`; a valid token without the delegated scope must return application JSON `403`.
 
 ## Quality & Type Checks
 

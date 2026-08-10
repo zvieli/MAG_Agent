@@ -5,7 +5,15 @@ validation to Azure App Service Authentication (Easy Auth). SPFx is the only
 authenticated production client. `/api/ping` is public liveness; all other routes
 require the delegated `user_impersonation` scope.
 
-## 1. Resolve and record tenant values
+## 1. Retire the exposed Function key
+
+The Function key captured in the deployment diagnostics is compromised. Renew or
+delete it in Function App > Functions > App keys before continuing, redact every
+retained copy of the diagnostics, and do not add the replacement to SPFx properties,
+package assets, browser storage, or support logs. Easy Auth bearer authentication is
+the only production browser authentication mechanism.
+
+## 2. Resolve and record tenant values
 
 Run these read-only commands in Azure Cloud Shell while signed into the production
 tenant. Replace the resource group and Function App placeholders first.
@@ -34,13 +42,18 @@ Never log or commit the token itself.
 Export a recoverable snapshot of the Function App's current Authentication and
 CORS settings before changing them.
 
-## 2. Deploy and approve SPFx 0.1.4
+## 3. Deploy and approve SPFx 0.1.5
 
 ```bash
 cd frontend/mag-spfx
 npm run test:auth
-npm run package:ship
+sha256sum sharepoint/solution/mag-spfx.sppkg
 ```
+
+Use Node 22 for any SPFx build. The approved `0.1.5` artifact is already generated;
+do not rebuild it immediately before this recovery upload because package timestamps
+change its checksum. Run `npm run package:ship` only when generating a deliberately
+new artifact, then record and approve that artifact's new checksum.
 
 Upload `sharepoint/solution/mag-spfx.sppkg` to the tenant App Catalog, deploy it,
 and approve the pending `MAG-Agent-Backend-API / user_impersonation` request under
@@ -48,7 +61,21 @@ SharePoint Admin Center > Advanced > API access. Replace the installed package a
 verify that a cloud request sends `Authorization: Bearer ...` and never sends
 `x-functions-key` before continuing.
 
-## 3. Stage Easy Auth without enforcing the gateway
+Before upload, verify the release identity:
+
+```text
+SHA-256: 2708b8c4182cea796364ba0f8e726e26236be7ef12cead2ce746ebd5d0080bc3
+Solution ID: b071a1d2-aa81-47ac-9849-768c2e54f213
+Version: 0.1.5.0
+Bundle: mag-app-web-part_eadc7fc94fd4022de255.js
+```
+
+The catalog's deployment error column must be empty. If the target site uses a
+site collection App Catalog or has a site-installed app shadowing the tenant
+package, replace and upgrade that same source and installation. The `0.1.5.0`
+version intentionally forces an explicit upgrade from any earlier `0.1.4` upload.
+
+## 4. Stage Easy Auth without enforcing the gateway
 
 In Function App > Settings > Authentication:
 
@@ -67,7 +94,7 @@ reach the Function with a parsed principal and log only `tid`, `oid`, `scp`, and
 `azp`. Missing/malformed principals must receive application JSON `401`, while a
 principal without the exact scope receives JSON `403`.
 
-## 4. Enforce Easy Auth and CORS
+## 5. Enforce Easy Auth and CORS
 
 Return to Authentication settings and select:
 
@@ -92,7 +119,7 @@ Configure Azure App Service Health check and external liveness monitors to call
 `/api/ping`. Monitoring that needs dependency details must call `/api/health` using
 the SPFx flow; no separate automation application is allowlisted.
 
-## 5. Production acceptance and key retirement
+## 6. Production acceptance
 
 Verify in order:
 
@@ -108,14 +135,17 @@ Verify in order:
 5. Upload, duplicate preflight, Durable polling, graph, report, timeline, and chat
    all complete without `x-functions-key`.
 
-After every check passes, renew or delete the previously exposed Function key from
-Function App > Functions > App keys. Do not distribute or document its replacement.
+Run acceptance from a normal page using the installed catalog package in a new
+private browser session. Remove `debugManifestsFile`, `debug`, localhost, and
+workbench parameters. If the old asset remains, clear SharePoint service-worker and
+site data, then reopen the page. The console fingerprint must report component
+version `0.1.5` and bundle `mag-app-web-part_eadc7fc94fd4022de255.js`.
 
 ## Rollback
 
 If principal injection, preflight, or SPFx traffic fails, set Easy Auth back to
 **Allow unauthenticated access** and redeploy the previous JWT-validating backend.
-Keep SPFx 0.1.4 installed: it already sends bearer tokens and remains compatible
+Keep SPFx 0.1.5 installed: it already sends bearer tokens and remains compatible
 with the prior validator. Restore the saved Authentication/CORS snapshot if the
 failure is configuration-related. Do not restore the retired Function key as an
 authentication fallback.

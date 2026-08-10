@@ -12,6 +12,7 @@ import { BaseClientSideWebPart } from '@microsoft/sp-webpart-base';
 import * as strings from 'MagAppWebPartStrings';
 import { MagApp } from './components/MagApp';
 import { MagAppConfig } from './domain/types';
+import { findMagAppBundleAsset } from './domain/runtimeFingerprint';
 import { DEFAULT_BACKEND_CLIENT_ID } from './services/TokenService';
 
 export interface IMagAppWebPartProps {
@@ -30,15 +31,9 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
   protected async onInit(): Promise<void> {
     await super.onInit();
 
-    const bundleAsset = window.performance?.getEntriesByType('resource')
-      .map((entry) => {
-        try {
-          return new URL(entry.name).pathname.split('/').pop();
-        } catch {
-          return undefined;
-        }
-      })
-      .find((name) => Boolean(name && /^mag-app-web-part_[0-9a-f]+\.js$/i.test(name)));
+    const resourceUrls = window.performance?.getEntriesByType('resource')
+      .map((entry) => entry.name) || [];
+    const bundleAsset = findMagAppBundleAsset(resourceUrls);
 
     console.info('[MAG] SPFx runtime fingerprint', {
       componentId: this.manifest.id.toString(),
