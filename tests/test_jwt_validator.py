@@ -41,12 +41,8 @@ def test_validate_bearer_token_require_entra_auth_false(monkeypatch):
 def test_validate_bearer_token_missing_config(monkeypatch):
     """Test that validate_bearer_token returns None if tenant or client ID is missing."""
     monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
-    monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
     monkeypatch.delenv("AZURE_Tenant_ID", raising=False)
-    monkeypatch.delenv("AZURE_TENANT_ID", raising=False)
-    monkeypatch.delenv("ENTRA_BACKEND_CLIENT_ID", raising=False)
     monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
-    monkeypatch.delenv("ENTRA_REQUIRED_SCOPE", raising=False)
 
     req = create_mock_request(headers={"Authorization": "Bearer some-token"})
     result = validate_bearer_token(req)
@@ -56,8 +52,8 @@ def test_validate_bearer_token_missing_config(monkeypatch):
 def test_validate_bearer_token_missing_header(monkeypatch):
     """Test missing Authorization header returns None."""
     monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
-    monkeypatch.setenv("ENTRA_TENANT_ID", "tenant-123")
-    monkeypatch.setenv("ENTRA_BACKEND_CLIENT_ID", "client-123")
+    monkeypatch.setenv("AZURE_Tenant_ID", "tenant-123")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "client-123")
 
     req = create_mock_request(headers={})
     assert validate_bearer_token(req) is None
@@ -66,8 +62,8 @@ def test_validate_bearer_token_missing_header(monkeypatch):
 def test_validate_bearer_token_invalid_header_format(monkeypatch):
     """Test malformed Authorization header returns None."""
     monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
-    monkeypatch.setenv("ENTRA_TENANT_ID", "tenant-123")
-    monkeypatch.setenv("ENTRA_BACKEND_CLIENT_ID", "client-123")
+    monkeypatch.setenv("AZURE_Tenant_ID", "tenant-123")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "client-123")
 
     req1 = create_mock_request(headers={"Authorization": "Basic abcdef"})
     assert validate_bearer_token(req1) is None
@@ -81,10 +77,9 @@ def test_validate_bearer_token_invalid_header_format(monkeypatch):
 def test_validate_bearer_token_valid(mock_jwt_decode, mock_get_jwks, monkeypatch):
     """A valid v2 delegated token returns its claims payload."""
     monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
-    monkeypatch.setenv("ENTRA_TENANT_ID", "tenant-123")
-    monkeypatch.setenv("ENTRA_BACKEND_CLIENT_ID", "client-123")
-    monkeypatch.setenv("ENTRA_APP_ID_URI", "api://client-123")
-    monkeypatch.setenv("ENTRA_REQUIRED_SCOPE", "user_impersonation")
+    monkeypatch.setenv("AZURE_Tenant_ID", "tenant-123")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "client-123")
+    monkeypatch.setenv("AZURE_Application_ID_URI", "api://client-123")
 
     mock_jwks_client = MagicMock()
     mock_signing_key = MagicMock()
@@ -125,16 +120,13 @@ def test_validate_bearer_token_valid(mock_jwt_decode, mock_get_jwks, monkeypatch
 
 @patch("src.auth.jwt_validator.get_jwks_client")
 @patch("jwt.decode")
-def test_validate_bearer_token_azure_env_vars_and_app_id_uri(
+def test_validate_bearer_token_app_id_uri_normalization(
     mock_jwt_decode, mock_get_jwks, monkeypatch
 ):
-    """Azure aliases remain supported and scope-form audiences are normalized."""
+    """Scope-form Application ID URIs are normalized before audience validation."""
     monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
-    monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
     monkeypatch.setenv("AZURE_Tenant_ID", "tenant-azure-alt")
-    monkeypatch.delenv("ENTRA_BACKEND_CLIENT_ID", raising=False)
     monkeypatch.setenv("AZURE_CLIENT_ID", "client-azure-alt")
-    monkeypatch.delenv("ENTRA_APP_ID_URI", raising=False)
     monkeypatch.setenv(
         "AZURE_Application_ID_URI", "api://custom-uri/user_impersonation/.default"
     )
@@ -161,8 +153,8 @@ def test_validate_bearer_token_azure_env_vars_and_app_id_uri(
 def test_validate_bearer_token_missing_scope(mock_jwt_decode, mock_get_jwks, monkeypatch):
     """A signed delegated token without the required scope is rejected."""
     monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
-    monkeypatch.setenv("ENTRA_TENANT_ID", "tenant-123")
-    monkeypatch.setenv("ENTRA_BACKEND_CLIENT_ID", "client-123")
+    monkeypatch.setenv("AZURE_Tenant_ID", "tenant-123")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "client-123")
     mock_get_jwks.return_value.get_signing_key_from_jwt.return_value.key = "key"
     mock_jwt_decode.return_value = {"sub": "user-1", "scp": "openid profile"}
 
@@ -175,9 +167,8 @@ def test_validate_bearer_token_missing_scope(mock_jwt_decode, mock_get_jwks, mon
 def test_validate_bearer_token_wrong_scope(mock_jwt_decode, mock_get_jwks, monkeypatch):
     """A similarly named scope does not satisfy the exact scope check."""
     monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
-    monkeypatch.setenv("ENTRA_TENANT_ID", "tenant-123")
-    monkeypatch.setenv("ENTRA_BACKEND_CLIENT_ID", "client-123")
-    monkeypatch.setenv("ENTRA_REQUIRED_SCOPE", "user_impersonation")
+    monkeypatch.setenv("AZURE_Tenant_ID", "tenant-123")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "client-123")
     mock_get_jwks.return_value.get_signing_key_from_jwt.return_value.key = "key"
     mock_jwt_decode.return_value = {"sub": "user-1", "scp": "user_impersonation.read"}
 
@@ -190,8 +181,8 @@ def test_validate_bearer_token_wrong_scope(mock_jwt_decode, mock_get_jwks, monke
 def test_validate_bearer_token_expired(mock_jwt_decode, mock_get_jwks, monkeypatch):
     """Test expired JWT token returns None."""
     monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
-    monkeypatch.setenv("ENTRA_TENANT_ID", "tenant-123")
-    monkeypatch.setenv("ENTRA_BACKEND_CLIENT_ID", "client-123")
+    monkeypatch.setenv("AZURE_Tenant_ID", "tenant-123")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "client-123")
 
     mock_jwks_client = MagicMock()
     mock_get_jwks.return_value = mock_jwks_client
@@ -207,8 +198,8 @@ def test_validate_bearer_token_expired(mock_jwt_decode, mock_get_jwks, monkeypat
 def test_validate_bearer_token_wrong_audience(mock_jwt_decode, mock_get_jwks, monkeypatch):
     """Test JWT token with wrong audience returns None."""
     monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
-    monkeypatch.setenv("ENTRA_TENANT_ID", "tenant-123")
-    monkeypatch.setenv("ENTRA_BACKEND_CLIENT_ID", "client-123")
+    monkeypatch.setenv("AZURE_Tenant_ID", "tenant-123")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "client-123")
 
     mock_jwks_client = MagicMock()
     mock_get_jwks.return_value = mock_jwks_client
@@ -224,8 +215,8 @@ def test_validate_bearer_token_wrong_audience(mock_jwt_decode, mock_get_jwks, mo
 def test_validate_bearer_token_wrong_issuer(mock_jwt_decode, mock_get_jwks, monkeypatch):
     """A token issued by another tenant is rejected."""
     monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
-    monkeypatch.setenv("ENTRA_TENANT_ID", "tenant-123")
-    monkeypatch.setenv("ENTRA_BACKEND_CLIENT_ID", "client-123")
+    monkeypatch.setenv("AZURE_Tenant_ID", "tenant-123")
+    monkeypatch.setenv("AZURE_CLIENT_ID", "client-123")
     mock_get_jwks.return_value.get_signing_key_from_jwt.return_value.key = "key"
     mock_jwt_decode.side_effect = jwt.InvalidIssuerError("Issuer invalid")
 

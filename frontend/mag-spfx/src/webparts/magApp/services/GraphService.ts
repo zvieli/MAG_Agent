@@ -3,8 +3,8 @@ import { browserCache } from '../domain/browserCache';
 import { DebugLogger } from '../domain/debugLogger';
 import { displayName, looksTechnicalId } from '../domain/displayNames';
 import { IGraphService } from './IAppServices';
-import { apiUrl, authHeaders, readJson } from './http';
-import { TokenService } from './TokenService';
+import { BackendAuthService, requireBackendAuthService } from './BackendAuthService';
+import { apiUrl, readJson } from './http';
 
 const graphTtlMs = 30 * 60 * 1000;
 
@@ -117,14 +117,12 @@ const normalizedGraph = (graph: GraphQueryResult, logger?: DebugLogger): GraphQu
 
 export class GraphService implements IGraphService {
   private readonly apiBaseUrl: string;
-  private readonly functionKey: string;
-  private readonly tokenService?: TokenService;
+  private readonly backendAuth: BackendAuthService;
   private readonly logger?: DebugLogger;
 
-  public constructor(apiBaseUrl: string, functionKey: string, tokenService?: TokenService, logger?: DebugLogger) {
+  public constructor(apiBaseUrl: string, backendAuth: BackendAuthService, logger?: DebugLogger) {
     this.apiBaseUrl = apiBaseUrl;
-    this.functionKey = functionKey;
-    this.tokenService = tokenService;
+    this.backendAuth = requireBackendAuthService(backendAuth, 'GraphService');
     this.logger = logger;
   }
 
@@ -151,11 +149,15 @@ export class GraphService implements IGraphService {
       return params.toString() ? `?${params.toString()}` : '';
     };
 
-    const token = await this.tokenService?.getAccessToken();
+    const requestUrl = apiUrl(
+      this.apiBaseUrl,
+      `/api/cases/${encodeURIComponent(query.docId)}/graph${graphSuffix(query.docId)}`
+    );
+    const headers = await this.backendAuth.getHeaders({ operation: 'graph-load', url: requestUrl });
 
     const fetchGraph = async (docId: string, partitionKey: string): Promise<GraphQueryResult> =>
       fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/graph${graphSuffix(partitionKey)}`), {
-        headers: authHeaders(this.functionKey, token)
+        headers
       }).then(readJson<GraphQueryResult>);
 
     let result = await fetchGraph(query.docId, query.docId);
@@ -192,11 +194,15 @@ export class GraphService implements IGraphService {
       return params.toString() ? `?${params.toString()}` : '';
     };
 
-    const token = await this.tokenService?.getAccessToken();
+    const requestUrl = apiUrl(
+      this.apiBaseUrl,
+      `/api/cases/${encodeURIComponent(query.docId)}/timeline${timelineSuffix(query.docId)}`
+    );
+    const headers = await this.backendAuth.getHeaders({ operation: 'timeline-load', url: requestUrl });
 
     const fetchTimelineGraph = async (docId: string, partitionKey: string): Promise<GraphQueryResult> =>
       fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/timeline${timelineSuffix(partitionKey)}`), {
-        headers: authHeaders(this.functionKey, token)
+        headers
       }).then(readJson<GraphQueryResult>);
 
     let result = await fetchTimelineGraph(query.docId, query.docId);

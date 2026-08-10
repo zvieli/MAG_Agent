@@ -3,7 +3,7 @@ import * as React from 'react';
 import styles from '../components/MagApp.module.scss';
 import { TimelineResult, TimelineEvent } from '../domain/types';
 import { ITimelineService } from '../services/IAppServices';
-import { errorText } from '../domain/localization';
+import { requestErrorText } from '../domain/localization';
 
 export interface TimelinePageProps {
   docId?: string;
@@ -47,7 +47,7 @@ export const TimelinePage: React.FC<TimelinePageProps> = ({ docId, timelineServi
         setTimeline(result);
       })
       .catch((loadError) => {
-        setError(loadError instanceof Error ? errorText(loadError.message) : 'אירעה שגיאה בטעינת ציר הזמן.');
+        setError(requestErrorText(loadError, 'אירעה שגיאה בטעינת ציר הזמן.'));
       })
       .then(() => {
         setLoading(false);

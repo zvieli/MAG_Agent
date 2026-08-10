@@ -33,8 +33,6 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
     let envApiTarget: string | undefined = undefined;
     let envUseMockData: string | undefined = undefined;
     let envPollIntervalMs: string | undefined = undefined;
-    let envBackendClientId: string | undefined = undefined;
-    let envBackendAppIdUri: string | undefined = undefined;
 
     try {
       isLocalDocker = process.env.VITE_USE_LOCAL_DOCKER === 'true';
@@ -50,11 +48,6 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
 
     try {
       envPollIntervalMs = process.env.VITE_POLL_INTERVAL_MS;
-    } catch (e) { /* process is not defined */ }
-
-    try {
-      envBackendClientId = process.env.VITE_BACKEND_CLIENT_ID;
-      envBackendAppIdUri = process.env.VITE_BACKEND_APP_ID_URI;
     } catch (e) { /* process is not defined */ }
 
     let apiBaseUrl = this.properties.apiBaseUrl || '';
@@ -98,9 +91,7 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
         this.properties.sharePointFolderServerRelativeUrl || `${cleanWebRelativeUrl}/Shared Documents`,
       backendClientId:
         this.properties.backendClientId?.trim() ||
-        envBackendClientId?.trim() ||
         this.properties.backendAppIdUri?.trim() ||
-        envBackendAppIdUri?.trim() ||
         DEFAULT_BACKEND_CLIENT_ID,
       aadTokenProviderFactory: this.context.aadTokenProviderFactory
     };

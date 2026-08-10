@@ -41,9 +41,7 @@ build.configureWebpack.mergeConfig({
       'VITE_AZURE_API_TARGET',
       'VITE_API_TARGET',
       'VITE_USE_MOCK_DATA',
-      'VITE_POLL_INTERVAL_MS',
-      'VITE_BACKEND_CLIENT_ID',
-      'VITE_BACKEND_APP_ID_URI'
+      'VITE_POLL_INTERVAL_MS'
     ]);
     const definitions = {};
     for (const key in env) {

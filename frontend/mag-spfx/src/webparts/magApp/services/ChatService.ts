@@ -3,20 +3,18 @@ import { DebugLogger, createDebugLogger } from '../domain/debugLogger';
 import { makeId, normalizeRuntimeStatus } from '../domain/guards';
 import { browserCache } from '../domain/browserCache';
 import { IChatService } from './IAppServices';
-import { apiUrl, authHeaders, readJson } from './http';
-import { TokenService } from './TokenService';
+import { BackendAuthService, requireBackendAuthService } from './BackendAuthService';
+import { apiUrl, readJson } from './http';
 
 export class ChatService implements IChatService {
   private readonly apiBaseUrl: string;
-  private readonly functionKey: string;
-  private readonly tokenService?: TokenService;
+  private readonly backendAuth: BackendAuthService;
   private readonly logger: DebugLogger;
   private readonly pendingCacheKeys: Record<string, string> = {};
 
-  public constructor(apiBaseUrl: string, functionKey: string, tokenService?: TokenService, logger?: DebugLogger) {
+  public constructor(apiBaseUrl: string, backendAuth: BackendAuthService, logger?: DebugLogger) {
     this.apiBaseUrl = apiBaseUrl;
-    this.functionKey = functionKey;
-    this.tokenService = tokenService;
+    this.backendAuth = requireBackendAuthService(backendAuth, 'ChatService');
     this.logger = logger || createDebugLogger(false);
   }
 
@@ -46,13 +44,16 @@ export class ChatService implements IChatService {
       questionPreview: question.slice(0, 120)
     });
 
-    const token = await this.tokenService?.getAccessToken();
-    const start = await fetch(url, {
-      method: 'POST',
-      headers: authHeaders(this.functionKey, token, {
+    const headers = await this.backendAuth.getHeaders(
+      { operation: 'query-start', url },
+      {
         'Content-Type': 'application/json',
         'x-mag-trace-id': traceId
-      }),
+      }
+    );
+    const start = await fetch(url, {
+      method: 'POST',
+      headers,
       body: JSON.stringify({ doc_id: docId, question, state })
     }).then((response) =>
       readJson<DurableStartResponse>(response, {
@@ -106,11 +107,12 @@ export class ChatService implements IChatService {
       statusUrl
     });
 
-    const token = await this.tokenService?.getAccessToken();
+    const headers = await this.backendAuth.getHeaders(
+      { operation: 'query-status', url: statusUrl },
+      { 'x-mag-trace-id': pollTraceId }
+    );
     const status = await fetch(statusUrl, {
-      headers: authHeaders(this.functionKey, token, {
-        'x-mag-trace-id': pollTraceId
-      })
+      headers
     }).then((response) =>
       readJson<DurableStatus<ChatAnswer>>(response, {
         logger: this.logger,

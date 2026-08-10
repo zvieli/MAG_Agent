@@ -1,4 +1,5 @@
 import { RuntimeStatus } from './types';
+import { isEntraAuthenticationError } from '../services/TokenService';
 
 const statusLabels: Record<RuntimeStatus, string> = {
   Pending: 'ממתין',
@@ -37,6 +38,13 @@ export const pipelinePhaseLabel = (phase: string | undefined, fallback?: Runtime
 export const technicalValue = (value: string | undefined, fallback = 'ממתין'): string => value || fallback;
 
 export const errorText = (message: string): string => `אירעה שגיאה: ${message}`;
+
+export const requestErrorText = (error: unknown, fallback: string): string => {
+  if (isEntraAuthenticationError(error)) {
+    return `שגיאת אבטחה ואימות: ${error.message}`;
+  }
+  return error instanceof Error ? errorText(error.message) : fallback;
+};
 
 export const sourceLabel = (source: string): string => {
   switch (source) {

@@ -22,7 +22,10 @@ export const normalizeBackendClientId = (value?: string): string | undefined => 
   return clientIdPattern.test(normalized) ? normalized : undefined;
 };
 
-interface EntraErrorDetails {
+export const ENTRA_AUTHENTICATION_FAILED = 'ENTRA_AUTHENTICATION_FAILED';
+
+export interface EntraErrorDetails {
+  reason?: string;
   errorCode?: string;
   correlationId?: string;
 }
@@ -51,6 +54,8 @@ const extractEntraErrorDetails = (error: unknown): EntraErrorDetails => {
 };
 
 export class EntraAuthenticationError extends Error {
+  public readonly code = ENTRA_AUTHENTICATION_FAILED;
+  public readonly reason?: string;
   public readonly errorCode?: string;
   public readonly correlationId?: string;
 
@@ -62,10 +67,18 @@ export class EntraAuthenticationError extends Error {
       `לא ניתן לקבל הרשאת Entra ID עבור שירות המערכת. יש לרענן את הדף או לפנות למנהל המערכת${diagnostic ? ` (${diagnostic})` : ''}.`
     );
     this.name = 'EntraAuthenticationError';
+    Object.setPrototypeOf(this, EntraAuthenticationError.prototype);
+    this.reason = details.reason;
     this.errorCode = details.errorCode;
     this.correlationId = details.correlationId;
   }
 }
+
+export const isEntraAuthenticationError = (error: unknown): error is EntraAuthenticationError => {
+  if (!error || typeof error !== 'object') return false;
+  const record = error as Record<string, unknown>;
+  return record.code === ENTRA_AUTHENTICATION_FAILED || record.name === 'EntraAuthenticationError';
+};
 
 export class TokenService {
   private readonly tokenProviderFactory?: AadTokenProviderFactory;
@@ -87,14 +100,16 @@ export class TokenService {
   public async getAccessToken(): Promise<string> {
     if (!this.tokenProviderFactory) {
       this.logger?.error('Entra ID authentication is unavailable', { reason: 'missing-token-provider-factory' });
-      throw new EntraAuthenticationError();
+      throw new EntraAuthenticationError({ reason: 'missing-token-provider-factory' });
     }
 
     if (!this.backendClientId) {
       this.logger?.error('Entra ID backend client ID is invalid', {
         reason: this.configuredBackendClientId ? 'invalid-backend-client-id' : 'missing-backend-client-id'
       });
-      throw new EntraAuthenticationError();
+      throw new EntraAuthenticationError({
+        reason: this.configuredBackendClientId ? 'invalid-backend-client-id' : 'missing-backend-client-id'
+      });
     }
 
     try {
@@ -105,7 +120,10 @@ export class TokenService {
       }
       return token;
     } catch (error) {
-      const details = extractEntraErrorDetails(error);
+      const details = {
+        reason: error instanceof Error && error.message === 'empty-token' ? 'empty-token' : 'token-acquisition-failed',
+        ...extractEntraErrorDetails(error)
+      };
       this.logger?.error('Failed to acquire Entra ID access token', {
         backendClientId: this.backendClientId,
         errorCode: details.errorCode,

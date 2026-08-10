@@ -4,7 +4,7 @@ import { GraphCanvas } from '../components/GraphCanvas';
 import styles from '../components/MagApp.module.scss';
 import { GraphEdge, GraphNode, GraphQueryResult } from '../domain/types';
 import { IGraphService } from '../services/IAppServices';
-import { errorText, nodeTypeLabel, relationLabel, sourceLabel } from '../domain/localization';
+import { nodeTypeLabel, relationLabel, requestErrorText, sourceLabel } from '../domain/localization';
 import { communityColor, confidenceLabel, connectedNodeCount, graphCommunities } from '../domain/graphVisuals';
 import { GraphCanvasCommand } from '../components/GraphCanvas';
 import { displayName } from '../domain/displayNames';
@@ -36,7 +36,7 @@ export const GraphPage: React.FC<GraphPageProps> = ({ docId, graphService }) => 
     try {
       setGraph(await graphService.getGraph({ docId, search, limit: 250, depth: 2 }, { forceRefresh }));
     } catch (loadError) {
-      setError(loadError instanceof Error ? errorText(loadError.message) : 'אירעה שגיאה בטעינת גרף הידע.');
+      setError(requestErrorText(loadError, 'אירעה שגיאה בטעינת גרף הידע.'));
     } finally {
       setLoading(false);
     }

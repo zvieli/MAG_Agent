@@ -1,20 +1,19 @@
 import { CommunitySummariesResult, ProtocolCompletenessResult, ReportResult } from '../domain/types';
 import { browserCache } from '../domain/browserCache';
 import { IReportService } from './IAppServices';
-import { apiUrl, authHeaders, readJson } from './http';
-import { TokenService } from './TokenService';
+import { BackendAuthService, requireBackendAuthService } from './BackendAuthService';
+import { isEntraAuthenticationError } from './TokenService';
+import { apiUrl, readJson } from './http';
 
 const reportTtlMs = 30 * 60 * 1000;
 
 export class ReportService implements IReportService {
   private readonly apiBaseUrl: string;
-  private readonly functionKey: string;
-  private readonly tokenService?: TokenService;
+  private readonly backendAuth: BackendAuthService;
 
-  public constructor(apiBaseUrl: string, functionKey: string, tokenService?: TokenService) {
+  public constructor(apiBaseUrl: string, backendAuth: BackendAuthService) {
     this.apiBaseUrl = apiBaseUrl;
-    this.functionKey = functionKey;
-    this.tokenService = tokenService;
+    this.backendAuth = requireBackendAuthService(backendAuth, 'ReportService');
   }
 
   public async getReport(docId: string, options?: { forceRefresh?: boolean }): Promise<ReportResult> {
@@ -30,13 +29,15 @@ export class ReportService implements IReportService {
     }
 
     try {
-      const token = await this.tokenService?.getAccessToken();
-      const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/report`), {
-        headers: authHeaders(this.functionKey, token)
+      const url = apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/report`);
+      const headers = await this.backendAuth.getHeaders({ operation: 'report-load', url });
+      const result = await fetch(url, {
+        headers
       }).then(readJson<ReportResult>);
       await browserCache.set(cacheKey, result, reportTtlMs);
       return { ...result, cache: { fromCache: false } };
     } catch (err) {
+      if (isEntraAuthenticationError(err)) throw err;
       const fallback: ReportResult = {
         docId,
         markdown: '',
@@ -61,13 +62,15 @@ export class ReportService implements IReportService {
     }
 
     try {
-      const token = await this.tokenService?.getAccessToken();
-      const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/communities`), {
-        headers: authHeaders(this.functionKey, token)
+      const url = apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/communities`);
+      const headers = await this.backendAuth.getHeaders({ operation: 'community-summaries-load', url });
+      const result = await fetch(url, {
+        headers
       }).then(readJson<CommunitySummariesResult>);
       await browserCache.set(cacheKey, result, reportTtlMs);
       return { ...result, cache: { fromCache: false } };
     } catch (err) {
+      if (isEntraAuthenticationError(err)) throw err;
       const fallback: CommunitySummariesResult = {
         docId,
         summaries: {},
@@ -93,13 +96,15 @@ export class ReportService implements IReportService {
     }
 
     try {
-      const token = await this.tokenService?.getAccessToken();
-      const result = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness`), {
-        headers: authHeaders(this.functionKey, token)
+      const url = apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness`);
+      const headers = await this.backendAuth.getHeaders({ operation: 'protocol-completeness-load', url });
+      const result = await fetch(url, {
+        headers
       }).then(readJson<ProtocolCompletenessResult>);
       await browserCache.set(cacheKey, result, reportTtlMs);
       return { ...result, cache: { fromCache: false } };
     } catch (err) {
+      if (isEntraAuthenticationError(err)) throw err;
       const fallback: ProtocolCompletenessResult = {
         docId,
         source: 'blob',
@@ -113,10 +118,11 @@ export class ReportService implements IReportService {
   }
 
   public async verifyProtocolCompletenessWithAgent(docId: string): Promise<string> {
-    const token = await this.tokenService?.getAccessToken();
-    const response = await fetch(apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness/verify`), {
+    const url = apiUrl(this.apiBaseUrl, `/api/cases/${encodeURIComponent(docId)}/completeness/verify`);
+    const headers = await this.backendAuth.getHeaders({ operation: 'protocol-completeness-verify', url });
+    const response = await fetch(url, {
       method: 'POST',
-      headers: authHeaders(this.functionKey, token)
+      headers
     });
     if (!response.ok) {
       throw new Error(`Verification request failed: ${response.statusText}`);
@@ -127,9 +133,9 @@ export class ReportService implements IReportService {
   }
 
   public async checkVerificationStatus(statusUrl: string): Promise<{ runtimeStatus: string }> {
-    const token = await this.tokenService?.getAccessToken();
+    const headers = await this.backendAuth.getHeaders({ operation: 'protocol-verification-status', url: statusUrl });
     const response = await fetch(statusUrl, {
-      headers: authHeaders(this.functionKey, token)
+      headers
     });
     if (!response.ok) {
       throw new Error(`Status query failed: ${response.statusText}`);

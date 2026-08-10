@@ -4,13 +4,23 @@ import { MarkdownView } from '../components/MarkdownView';
 import styles from '../components/MagApp.module.scss';
 import { CommunitySummariesResult, ProtocolCompletenessItem, ProtocolCompletenessResult, ReportResult } from '../domain/types';
 import { IReportService } from '../services/IAppServices';
-import { errorText, sourceLabel } from '../domain/localization';
+import { requestErrorText, sourceLabel } from '../domain/localization';
+import { isEntraAuthenticationError } from '../services/TokenService';
 
 
 export interface ReportPageProps {
   docId?: string;
   reportService: IReportService;
 }
+
+const optionalNonAuthenticationResult = async <T,>(request: Promise<T>): Promise<T | undefined> => {
+  try {
+    return await request;
+  } catch (error) {
+    if (isEntraAuthenticationError(error)) throw error;
+    return undefined;
+  }
+};
 
 interface ParsedStats {
   nodes: number;
@@ -213,9 +223,9 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
     setLoading(true);
     setError(undefined);
     Promise.all([
-      reportService.getReport(docId, { forceRefresh }).catch(() => undefined),
-      reportService.getCommunitySummaries(docId, { forceRefresh }).catch(() => undefined),
-      reportService.getProtocolCompleteness(docId, { forceRefresh }).catch(() => undefined)
+      optionalNonAuthenticationResult(reportService.getReport(docId, { forceRefresh })),
+      optionalNonAuthenticationResult(reportService.getCommunitySummaries(docId, { forceRefresh })),
+      optionalNonAuthenticationResult(reportService.getProtocolCompleteness(docId, { forceRefresh }))
     ])
       .then(([result, communityResult, completenessResult]) => {
         if (result) setReport(result);
@@ -223,7 +233,7 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
         setCompleteness(completenessResult);
         setLoading(false);
       })
-      .catch((reportError) => setError(reportError instanceof Error ? errorText(reportError.message) : 'אירעה שגיאה בטעינת הדו"ח.'))
+      .catch((reportError) => setError(requestErrorText(reportError, 'אירעה שגיאה בטעינת הדו"ח.')))
       .then(() => setLoading(false));
 
   }, [docId, reportService]);
@@ -261,15 +271,22 @@ export const ReportPage: React.FC<ReportPageProps> = ({ docId, reportService }) 
           } else {
             setVerificationMessage(`סוכן חכם סורק ומאמת חומר חקירה... (${status.runtimeStatus || 'בביצוע'})`);
           }
-        } catch {
+        } catch (statusError) {
           clearInterval(pollInterval);
           setVerifyingAgent(false);
+          if (isEntraAuthenticationError(statusError)) {
+            setError(requestErrorText(statusError, 'אירעה שגיאת אימות בבדיקת מצב הסוכן.'));
+            setVerificationMessage(undefined);
+            return;
+          }
           loadReport(true);
         }
       }, 2500);
     } catch (err) {
       setVerifyingAgent(false);
-      setVerificationMessage(err instanceof Error ? err.message : 'אירעה שגיאה בהפעלת אימות סוכן.');
+      const message = requestErrorText(err, 'אירעה שגיאה בהפעלת אימות סוכן.');
+      setVerificationMessage(message);
+      if (isEntraAuthenticationError(err)) setError(message);
     }
   }, [docId, reportService, loadReport]);
 

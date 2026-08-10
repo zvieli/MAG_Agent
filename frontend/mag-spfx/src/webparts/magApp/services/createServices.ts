@@ -9,6 +9,7 @@ import { PipelineService } from './PipelineService';
 import { ReportService } from './ReportService';
 import { TimelineService } from './TimelineService';
 import { SharePointFileService } from './SharePointFileService';
+import { BackendAuthService } from './BackendAuthService';
 import { TokenService } from './TokenService';
 
 export const createServices = (config: MagAppConfig, spHttpClient: SPHttpClient): IAppServices => {
@@ -24,15 +25,21 @@ export const createServices = (config: MagAppConfig, spHttpClient: SPHttpClient)
     config.backendClientId || config.backendAppIdUri,
     logger
   );
+  const backendAuth = new BackendAuthService(
+    config.apiBaseUrl,
+    config.functionKey,
+    tokenService,
+    logger
+  );
 
-  const graph = new GraphService(config.apiBaseUrl, config.functionKey, tokenService, logger);
+  const graph = new GraphService(config.apiBaseUrl, backendAuth, logger);
 
   return {
-    pipeline: new PipelineService(config.apiBaseUrl, config.functionKey, tokenService, logger),
+    pipeline: new PipelineService(config.apiBaseUrl, backendAuth, logger),
     graph,
-    report: new ReportService(config.apiBaseUrl, config.functionKey, tokenService),
+    report: new ReportService(config.apiBaseUrl, backendAuth),
     timeline: new TimelineService(graph),
-    chat: new ChatService(config.apiBaseUrl, config.functionKey, tokenService, logger),
+    chat: new ChatService(config.apiBaseUrl, backendAuth, logger),
     sharePointFiles
   };
 };

@@ -3,7 +3,7 @@ import * as React from 'react';
 import styles from '../components/MagApp.module.scss';
 import { StatusBadge } from '../components/StatusBadge';
 import { isSuccessfulPipeline, isTerminalStatus } from '../domain/guards';
-import { errorText, pipelinePhaseLabel, runtimeStatusLabel, technicalValue } from '../domain/localization';
+import { errorText, pipelinePhaseLabel, requestErrorText, runtimeStatusLabel, technicalValue } from '../domain/localization';
 import { PipelineOperation, SPFile } from '../domain/types';
 import { IPipelineService, ISharePointFileService } from '../services/IAppServices';
 import { normalizeFolderServerRelativeUrl } from '../services/SharePointFileService';
@@ -102,9 +102,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
           onComplete();
         }
       } catch (pollError) {
-        setError(
-          pollError instanceof Error ? errorText(pollError.message) : 'אירעה שגיאה בבדיקת מצב העיבוד.'
-        );
+        setError(requestErrorText(pollError, 'אירעה שגיאה בבדיקת מצב העיבוד.'));
         window.clearInterval(timer);
       }
     }, pollIntervalMs);
@@ -145,7 +143,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
         onComplete();
       }
     } catch (startError) {
-      setError(startError instanceof Error ? errorText(startError.message) : 'אירעה שגיאה בהתחלת העיבוד.');
+      setError(requestErrorText(startError, 'אירעה שגיאה בהתחלת העיבוד.'));
     } finally {
       setIsDownloading(false);
       setIsStarting(false);

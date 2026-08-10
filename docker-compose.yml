@@ -29,10 +29,6 @@ services:
         condition: service_healthy
     environment:
       REQUIRE_ENTRA_AUTH: "${REQUIRE_ENTRA_AUTH:-false}"
-      ENTRA_TENANT_ID: "${ENTRA_TENANT_ID:-}"
-      ENTRA_BACKEND_CLIENT_ID: "${ENTRA_BACKEND_CLIENT_ID:-}"
-      ENTRA_APP_ID_URI: "${ENTRA_APP_ID_URI:-}"
-      ENTRA_REQUIRED_SCOPE: "${ENTRA_REQUIRED_SCOPE:-user_impersonation}"
       AZURE_Tenant_ID: "${AZURE_Tenant_ID:-}"
       AZURE_CLIENT_ID: "${AZURE_CLIENT_ID:-}"
       AZURE_Application_ID_URI: "${AZURE_Application_ID_URI:-}"

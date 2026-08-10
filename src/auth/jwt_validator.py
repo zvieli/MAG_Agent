@@ -39,41 +39,30 @@ def validate_bearer_token(req: func.HttpRequest) -> Optional[Dict[str, Any]]:
     """Validate Bearer token from HttpRequest header against Entra ID JWKS.
 
     If REQUIRE_ENTRA_AUTH environment variable is not 'true', returns default dev user payload.
-    Otherwise, decodes token, verifies RS256 signature, audience, issuer, and
-    the delegated scope configured by ENTRA_REQUIRED_SCOPE.
+    Otherwise, decodes token and verifies RS256 signature, audience, issuer,
+    and the required user_impersonation delegated scope.
     Returns claims dict if valid, or None if invalid/expired/missing.
     """
     require_auth = os.getenv("REQUIRE_ENTRA_AUTH", "false").lower() == "true"
     if not require_auth:
         return {"sub": "dev-user", "name": "Local Development"}
 
-    tenant_id = (
-        os.getenv("ENTRA_TENANT_ID")
-        or os.getenv("AZURE_Tenant_ID")
-        or os.getenv("AZURE_TENANT_ID")
-    )
-    client_id = (
-        os.getenv("ENTRA_BACKEND_CLIENT_ID")
-        or os.getenv("AZURE_CLIENT_ID")
-    )
-    app_id_uri = (
-        os.getenv("ENTRA_APP_ID_URI")
-        or os.getenv("AZURE_Application_ID_URI")
-        or f"api://{client_id}"
-    )
-    required_scope = os.getenv("ENTRA_REQUIRED_SCOPE", DEFAULT_REQUIRED_SCOPE).strip()
+    tenant_id = os.getenv("AZURE_Tenant_ID")
+    client_id = os.getenv("AZURE_CLIENT_ID")
+    app_id_uri = os.getenv("AZURE_Application_ID_URI") or f"api://{client_id}"
 
-    if not tenant_id or not client_id or not required_scope:
+    if not tenant_id or not client_id:
         logger.warning(
-            "Canonical Entra authentication settings are incomplete; expected "
-            "ENTRA_TENANT_ID, ENTRA_BACKEND_CLIENT_ID, ENTRA_APP_ID_URI, and "
-            "ENTRA_REQUIRED_SCOPE (supported Azure aliases remain available)"
+            "Entra authentication settings are incomplete; expected "
+            "AZURE_Tenant_ID and AZURE_CLIENT_ID"
         )
         return None
 
     normalized_app_id_uri = _normalize_app_id_uri(app_id_uri)
     if not normalized_app_id_uri:
-        logger.warning("ENTRA_APP_ID_URI is invalid after audience normalization")
+        logger.warning(
+            "AZURE_Application_ID_URI is invalid after audience normalization"
+        )
         return None
 
     auth_header = req.headers.get("authorization") or req.headers.get("Authorization")
@@ -111,7 +100,10 @@ def validate_bearer_token(req: func.HttpRequest) -> Optional[Dict[str, Any]]:
         )
 
         granted_scopes = payload.get("scp")
-        if not isinstance(granted_scopes, str) or required_scope not in granted_scopes.split():
+        if (
+            not isinstance(granted_scopes, str)
+            or DEFAULT_REQUIRED_SCOPE not in granted_scopes.split()
+        ):
             logger.warning("JWT validation failed: required delegated scope is missing")
             return None
 

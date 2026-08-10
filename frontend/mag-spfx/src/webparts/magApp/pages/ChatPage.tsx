@@ -4,7 +4,7 @@ import { isTerminalStatus, makeId } from '../domain/guards';
 import { ChatMessage } from '../domain/types';
 import { IChatService } from '../services/IAppServices';
 import styles from '../components/MagApp.module.scss';
-import { errorText } from '../domain/localization';
+import { requestErrorText } from '../domain/localization';
 import { MarkdownView } from '../components/MarkdownView';
 
 export interface ChatPageProps {
@@ -210,7 +210,7 @@ export const ChatPage: React.FC<ChatPageProps> = ({ docId, chatService, pollInte
       }, 2000);
       return;
     }
-    setError(err instanceof Error ? errorText(err.message) : 'אירעה שגיאה בתקשורת עם השרת.');
+    setError(requestErrorText(err, 'אירעה שגיאה בתקשורת עם השרת.'));
     if (assistantMsgId) {
       setMessages((current) =>
         current.map((message) =>

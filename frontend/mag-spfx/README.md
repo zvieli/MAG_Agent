@@ -58,19 +58,18 @@ x-mag-trace-id: <client-generated-trace-id>
 
 ## Production Entra Authentication
 
-The SPFx token provider must receive the bare backend client ID, not an App ID URI, delegated scope, or `/.default` value. In live mode, token acquisition failures stop the backend request and surface an authentication error; the client never retries the request without a Bearer token.
+The SPFx token provider must receive the bare backend client ID, not an App ID URI, delegated scope, or `/.default` value. A shared authentication boundary obtains complete request headers for pipeline, graph, report, timeline, and chat calls. For every non-loopback API URL, token acquisition failures stop the request before `fetch` or XHR and surface a sanitized security error in the console and UI; the client never retries without a Bearer token. Exact `localhost`, `127.0.0.1`, and `::1` URLs retain function-key-only local compatibility.
 
-Configure the Function App with these canonical settings:
+Configure the Function App with the authentication settings already used by the repository's `.env`:
 
 ```text
 REQUIRE_ENTRA_AUTH=true
-ENTRA_TENANT_ID=<tenant-guid>
-ENTRA_BACKEND_CLIENT_ID=026e9069-414c-4df4-8513-bdeb9ff301d2
-ENTRA_APP_ID_URI=api://026e9069-414c-4df4-8513-bdeb9ff301d2
-ENTRA_REQUIRED_SCOPE=user_impersonation
+AZURE_Tenant_ID=<tenant-guid>
+AZURE_CLIENT_ID=026e9069-414c-4df4-8513-bdeb9ff301d2
+AZURE_Application_ID_URI=api://026e9069-414c-4df4-8513-bdeb9ff301d2
 ```
 
-The existing `AZURE_Tenant_ID`/`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_Application_ID_URI` aliases remain supported during migration. Production must keep `REQUIRE_ENTRA_AUTH=true`; a function key does not replace Entra JWT validation.
+The backend requires the fixed delegated scope `user_impersonation`; it is not an additional environment setting. Production must keep `REQUIRE_ENTRA_AUTH=true`; a function key does not replace Entra JWT validation. The Web Part property and built-in client-ID default provide the frontend configuration.
 
 Before deployment, DevOps must confirm that the backend registration exposes delegated scope `user_impersonation`, that its client ID and Application ID URI match the values above, and that admin consent was granted to the actual SPFx calling service principal. This staged package intentionally has no `webApiPermissionRequests` entry. If the bare-client-ID request still fails after that consent, add a request whose `resource` is the backend App Registration's exact Entra **display name**, redeploy, and approve it in SharePoint API Access. Never place a GUID in `resource`.
 

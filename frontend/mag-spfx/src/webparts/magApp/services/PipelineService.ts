@@ -2,19 +2,17 @@ import { deriveDocId, makeId, normalizeRuntimeStatus } from '../domain/guards';
 import { DurableStartResponse, DurableStatus, PipelineOperation, PipelineOutput, PipelinePreflightResult } from '../domain/types';
 import { DebugLogger, createDebugLogger } from '../domain/debugLogger';
 import { IPipelineService } from './IAppServices';
-import { HttpError, apiUrl, authHeaders, readJson } from './http';
-import { TokenService } from './TokenService';
+import { BackendAuthService, requireBackendAuthService } from './BackendAuthService';
+import { HttpError, apiUrl, readJson } from './http';
 
 export class PipelineService implements IPipelineService {
   private readonly apiBaseUrl: string;
-  private readonly functionKey: string;
-  private readonly tokenService?: TokenService;
+  private readonly backendAuth: BackendAuthService;
   private readonly logger: DebugLogger;
 
-  public constructor(apiBaseUrl: string, functionKey: string, tokenService?: TokenService, logger?: DebugLogger) {
+  public constructor(apiBaseUrl: string, backendAuth: BackendAuthService, logger?: DebugLogger) {
     this.apiBaseUrl = apiBaseUrl;
-    this.functionKey = functionKey;
-    this.tokenService = tokenService;
+    this.backendAuth = requireBackendAuthService(backendAuth, 'PipelineService');
     this.logger = logger || createDebugLogger(false);
   }
 
@@ -52,13 +50,22 @@ export class PipelineService implements IPipelineService {
     fileName: string
   ): Promise<PipelinePreflightResult> {
     try {
-      const token = await this.tokenService?.getAccessToken();
-      const preflight = await fetch(preflightUrl, {
-        cache: 'no-store',
-        headers: authHeaders(this.functionKey, token, {
+      const headers = await this.backendAuth.getHeaders(
+        { operation: 'pipeline-preflight', url: preflightUrl },
+        {
           'Cache-Control': 'no-cache',
           'x-mag-trace-id': traceId
-        })
+        }
+      );
+      this.logger.info('Pipeline duplicate preflight sending', {
+        traceId,
+        url: preflightUrl,
+        authMode: this.backendAuth.mode,
+        hasBearerToken: Boolean(headers.Authorization)
+      });
+      const preflight = await fetch(preflightUrl, {
+        cache: 'no-store',
+        headers
       }).then((response) =>
         readJson<PipelinePreflightResult>(response, {
           logger: this.logger,
@@ -100,8 +107,7 @@ export class PipelineService implements IPipelineService {
   private uploadWithProgress(
     url: string,
     file: File,
-    functionKey: string,
-    token: string | undefined,
+    headers: Record<string, string>,
     traceId: string,
     startedAtMs: number,
     onProgress: ((operation: PipelineOperation) => void) | undefined
@@ -110,15 +116,8 @@ export class PipelineService implements IPipelineService {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', url);
 
-      const headers = authHeaders(functionKey, token, {
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(file.name)}"`,
-        'Content-Type': 'application/pdf',
-        'x-mag-file-name': encodeURIComponent(file.name),
-        'x-mag-trace-id': traceId
-      });
-
-      Object.keys(headers as Record<string, string>).forEach((key) => {
-        xhr.setRequestHeader(key, (headers as Record<string, string>)[key]);
+      Object.keys(headers).forEach((key) => {
+        xhr.setRequestHeader(key, headers[key]);
       });
 
       xhr.upload.onprogress = (event: ProgressEvent<EventTarget>) => {
@@ -176,7 +175,7 @@ export class PipelineService implements IPipelineService {
       onProgress
     );
 
-    this.logger.group('Pipeline duplicate preflight request', {
+    this.logger.group('Pipeline duplicate preflight preparing', {
       traceId,
       method: 'GET',
       url: preflightUrl,
@@ -233,7 +232,7 @@ export class PipelineService implements IPipelineService {
       throw new Error(preflight.error || 'בדיקת כפילות התיק נכשלה.');
     }
 
-    this.logger.group('Pipeline start request', {
+    this.logger.group('Pipeline start preparing', {
       traceId,
       method: 'POST',
       url,
@@ -256,8 +255,22 @@ export class PipelineService implements IPipelineService {
       onProgress
     );
 
-    const token = await this.tokenService?.getAccessToken();
-    const start = await this.uploadWithProgress(url, file, this.functionKey, token, traceId, startedAtMs, onProgress);
+    const headers = await this.backendAuth.getHeaders(
+      { operation: 'pipeline-start', url },
+      {
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(file.name)}"`,
+        'Content-Type': 'application/pdf',
+        'x-mag-file-name': encodeURIComponent(file.name),
+        'x-mag-trace-id': traceId
+      }
+    );
+    this.logger.info('Pipeline start sending', {
+      traceId,
+      url,
+      authMode: this.backendAuth.mode,
+      hasBearerToken: Boolean(headers.Authorization)
+    });
+    const start = await this.uploadWithProgress(url, file, headers, traceId, startedAtMs, onProgress);
 
     const duplicateStart = start as DurableStartResponse & PipelinePreflightResult;
     if (duplicateStart.status === 'duplicate' && duplicateStart.matched_doc_id) {
@@ -333,17 +346,18 @@ export class PipelineService implements IPipelineService {
   public async getStatus(operation: PipelineOperation): Promise<PipelineOperation> {
     const traceId = operation.traceId || operation.instanceId;
     const pollStartedAtMs = Date.now();
-    this.logger.info('Pipeline status poll request', {
+    this.logger.info('Pipeline status poll preparing', {
       traceId,
       instanceId: operation.instanceId,
       statusUrl: operation.statusUrl
     });
 
-    const token = await this.tokenService?.getAccessToken();
+    const headers = await this.backendAuth.getHeaders(
+      { operation: 'pipeline-status', url: operation.statusUrl },
+      { 'x-mag-trace-id': traceId }
+    );
     const status = await fetch(operation.statusUrl, {
-      headers: authHeaders(this.functionKey, token, {
-        'x-mag-trace-id': traceId
-      })
+      headers
     }).then((response) =>
       readJson<DurableStatus<PipelineOutput>>(response, {
         logger: this.logger,
