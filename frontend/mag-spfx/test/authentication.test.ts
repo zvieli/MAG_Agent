@@ -87,7 +87,7 @@ describe('SPFx Entra authentication', () => {
 
   it('sends cloud preflight only after adding the Bearer token', async () => {
     const tokenService = tokenServiceWith(jest.fn().mockResolvedValue('access-token'));
-    const backendAuth = new BackendAuthService(cloudUrl, 'function-key', tokenService, logger);
+    const backendAuth = new BackendAuthService(cloudUrl, tokenService, logger);
     const service = new PipelineService(cloudUrl, backendAuth, logger);
     const fetchSpy = jest.fn().mockResolvedValue(duplicateResponse());
     window.fetch = fetchSpy;
@@ -98,7 +98,7 @@ describe('SPFx Entra authentication', () => {
     const options = fetchSpy.mock.calls[0][1] as RequestInit;
     const headers = options.headers as Headers;
     expect(headers.get('Authorization')).toBe('Bearer access-token');
-    expect(headers.get('x-functions-key')).toBe('function-key');
+    expect(headers.has('x-functions-key')).toBe(false);
     expect(headers.get('x-mag-trace-id')).toBe('trace-1');
   });
 
@@ -107,7 +107,7 @@ describe('SPFx Entra authentication', () => {
     ['empty token', jest.fn().mockResolvedValue(undefined)]
   ])('blocks preflight with zero network calls on %s', async (_label, getAccessToken) => {
     const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    const backendAuth = new BackendAuthService(cloudUrl, 'function-key', tokenServiceWith(getAccessToken), logger);
+    const backendAuth = new BackendAuthService(cloudUrl, tokenServiceWith(getAccessToken), logger);
     const service = new PipelineService(cloudUrl, backendAuth, logger);
     const fetchSpy = jest.fn();
     window.fetch = fetchSpy;
@@ -137,7 +137,6 @@ describe('SPFx Entra authentication', () => {
     const authError = new EntraAuthenticationError({ reason: 'token-acquisition-failed' });
     const backendAuth = new BackendAuthService(
       cloudUrl,
-      'function-key',
       tokenServiceWith(jest.fn().mockRejectedValue(authError)),
       logger
     );
@@ -179,9 +178,9 @@ describe('SPFx Entra authentication', () => {
     'http://localhost:7071',
     'https://127.0.0.1:7071',
     'http://[::1]:7071'
-  ])('allows function-key-only compatibility for loopback URL %s', async (url) => {
+  ])('allows tokenless local development for loopback URL %s', async (url) => {
     const getAccessToken = jest.fn().mockRejectedValue(new Error('must not be called'));
-    const backendAuth = new BackendAuthService(url, 'local-key', tokenServiceWith(getAccessToken), logger);
+    const backendAuth = new BackendAuthService(url, tokenServiceWith(getAccessToken), logger);
     const fetchSpy = jest.fn().mockResolvedValue({ ok: true });
     window.fetch = fetchSpy;
 
@@ -193,7 +192,7 @@ describe('SPFx Entra authentication', () => {
     expect(isLoopbackApiUrl(url)).toBe(true);
     const headers = fetchSpy.mock.calls[0][1].headers as Headers;
     expect(headers.get('Authorization')).toBeNull();
-    expect(headers.get('x-functions-key')).toBe('local-key');
+    expect(headers.has('x-functions-key')).toBe(false);
     expect(headers.get('x-mag-trace-id')).toBe('local-trace');
   });
 
@@ -201,7 +200,6 @@ describe('SPFx Entra authentication', () => {
     const getAccessToken = jest.fn().mockResolvedValue('external-token');
     const backendAuth = new BackendAuthService(
       'http://localhost:7071',
-      'local-key',
       tokenServiceWith(getAccessToken),
       logger
     );
@@ -226,7 +224,7 @@ describe('SPFx Entra authentication', () => {
     'file://localhost/tmp/api'
   ])('treats %s as a cloud-protected URL', (url) => {
     const tokenService = tokenServiceWith(jest.fn());
-    expect(new BackendAuthService(url, '', tokenService, logger).mode).toBe('entra');
+    expect(new BackendAuthService(url, tokenService, logger).mode).toBe('entra');
     expect(isLoopbackApiUrl(url)).toBe(false);
   });
 
@@ -235,7 +233,6 @@ describe('SPFx Entra authentication', () => {
     const authError = new EntraAuthenticationError({ reason: 'token-acquisition-failed' });
     const backendAuth = new BackendAuthService(
       cloudUrl,
-      'function-key',
       tokenServiceWith(jest.fn().mockRejectedValue(authError)),
       logger
     );
@@ -254,7 +251,6 @@ describe('SPFx Entra authentication', () => {
     const authError = new EntraAuthenticationError({ reason: 'token-acquisition-failed' });
     const backendAuth = new BackendAuthService(
       cloudUrl,
-      'function-key',
       tokenServiceWith(jest.fn().mockRejectedValue(authError)),
       logger
     );
@@ -276,7 +272,6 @@ describe('SPFx Entra authentication', () => {
   it('opens cloud XHR only after applying Entra and operational headers', async () => {
     const backendAuth = new BackendAuthService(
       cloudUrl,
-      'function-key',
       tokenServiceWith(jest.fn().mockResolvedValue('xhr-access-token')),
       logger
     );
@@ -296,7 +291,7 @@ describe('SPFx Entra authentication', () => {
       expect(xhrConstructor).toHaveBeenCalledTimes(1);
       expect(open).toHaveBeenCalledWith('POST', `${cloudUrl}/api/pipelines`);
       expect(setRequestHeader).toHaveBeenCalledWith('authorization', 'Bearer xhr-access-token');
-      expect(setRequestHeader).toHaveBeenCalledWith('x-functions-key', 'function-key');
+      expect(setRequestHeader).not.toHaveBeenCalledWith('x-functions-key', expect.anything());
       expect(setRequestHeader).toHaveBeenCalledWith('x-mag-trace-id', 'trace-xhr');
     } finally {
       window.XMLHttpRequest = originalXhr;
@@ -310,7 +305,7 @@ describe('SPFx Entra authentication', () => {
     );
     const factory = { getTokenProvider: jest.fn().mockResolvedValue({ getToken }) };
     const tokenService = new TokenService(factory as any, DEFAULT_BACKEND_CLIENT_ID, logger);
-    const backendAuth = new BackendAuthService(cloudUrl, '', tokenService, logger);
+    const backendAuth = new BackendAuthService(cloudUrl, tokenService, logger);
     const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
     let caught: unknown;

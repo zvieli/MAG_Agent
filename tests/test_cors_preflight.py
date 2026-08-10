@@ -14,8 +14,9 @@ class TestCorsPreflight(unittest.TestCase):
         headers = _get_cors_headers_for_req(None)
         self.assertEqual(
             headers["Access-Control-Allow-Headers"],
-            "Authorization, Content-Type, Content-Disposition, x-functions-key, x-mag-file-name, *",
+            "Authorization, Content-Type, Content-Disposition, x-mag-file-name, x-mag-trace-id, Cache-Control, Pragma",
         )
+        self.assertNotIn("Access-Control-Allow-Origin", headers)
 
     def test_upload_filename_uses_matching_redundant_metadata(self):
         req = Mock()
@@ -47,7 +48,7 @@ class TestCorsPreflight(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Conflicting PDF filename metadata"):
             _resolve_upload_filename(conflicting)
 
-    def test_cors_headers_echoes_request_headers_includes_authorization(self):
+    def test_cors_headers_use_fixed_allowlist_for_allowed_origin(self):
         req = Mock()
         req.headers = {
             "Origin": "https://tikshuv.sharepoint.com",
@@ -57,41 +58,35 @@ class TestCorsPreflight(unittest.TestCase):
         self.assertEqual(headers["Access-Control-Allow-Origin"], "https://tikshuv.sharepoint.com")
         self.assertIn("Authorization", headers["Access-Control-Allow-Headers"])
         self.assertIn("x-mag-trace-id", headers["Access-Control-Allow-Headers"])
+        self.assertNotIn("sec-fetch-dest", headers["Access-Control-Allow-Headers"])
+
+    def test_cors_headers_do_not_grant_disallowed_origin(self):
+        req = Mock()
+        req.headers = {"Origin": "https://evil.example"}
+        headers = _get_cors_headers_for_req(req)
+        self.assertNotIn("Access-Control-Allow-Origin", headers)
 
     def test_options_request_handler(self):
         req = Mock()
         req.headers = {
             "origin": "https://tikshuv.sharepoint.com",
-            "access-control-request-headers": "authorization, content-type, x-functions-key",
+            "access-control-request-headers": "authorization, content-type, x-mag-trace-id",
         }
         res = _handle_options_request(req)
         self.assertEqual(res.status_code, 204)
         self.assertEqual(res.headers.get("Access-Control-Allow-Origin"), "https://tikshuv.sharepoint.com")
         self.assertIn("authorization", res.headers.get("Access-Control-Allow-Headers").lower())
 
-    @patch("src.auth.decorators.validate_bearer_token", return_value=None)
-    def test_endpoint_requires_token_auth_unauthorized(self, mock_validate):
+    def test_ping_is_public(self):
         req = func.HttpRequest(
             method="GET",
             url="https://func.azurewebsites.net/api/ping",
-            headers={},
-            body=b"",
-        )
-        res = ping(req)
-        self.assertEqual(res.status_code, 401)
-        self.assertIn("Access-Control-Allow-Origin", res.headers)
-        self.assertIn("Authorization", res.headers["Access-Control-Allow-Headers"])
-
-    @patch("src.auth.decorators.validate_bearer_token", return_value={"sub": "user1"})
-    def test_endpoint_requires_token_auth_authorized(self, mock_validate):
-        req = func.HttpRequest(
-            method="GET",
-            url="https://func.azurewebsites.net/api/ping",
-            headers={"Authorization": "Bearer valid_token"},
+            headers={"Origin": "https://tikshuv.sharepoint.com"},
             body=b"",
         )
         res = ping(req)
         self.assertEqual(res.status_code, 200)
+        self.assertIn("Access-Control-Allow-Origin", res.headers)
         self.assertEqual(res.get_body().decode("utf-8"), "Healthy")
 
 

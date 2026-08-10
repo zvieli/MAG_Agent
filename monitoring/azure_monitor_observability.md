@@ -73,9 +73,27 @@ traces
   by bin(timestamp, 10m)
 ```
 
-## Health And Dependency Probes
+## Public Liveness
 
-Alert: critical when health status is `Unhealthy`; warning when any required dependency is unhealthy.
+Azure App Service Health check and unauthenticated availability tests must call
+`/api/ping`. Alert when any non-2xx response is observed or when no requests are
+recorded during the expected probe interval.
+
+```kusto
+requests
+| where url endswith "/api/ping"
+| summarize
+    probes=count(),
+    failures=countif(success == false or resultCode !startswith "2")
+  by bin(timestamp, 5m)
+```
+
+## Authenticated Dependency Diagnostics
+
+`/api/health` is protected by Easy Auth and is not suitable for anonymous Azure
+availability tests. These queries remain useful for interactive SPFx diagnostics
+and any future explicitly allowlisted operational client. Alert: critical when
+health status is `Unhealthy`; warning when any required dependency is unhealthy.
 
 ```kusto
 traces
@@ -149,4 +167,3 @@ traces
 | where message has target_trace_id
 | order by timestamp asc
 ```
-

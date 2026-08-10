@@ -35,8 +35,7 @@ https://<tenant>.sharepoint.com/_layouts/15/workbench.aspx?debugManifestsFile=ht
 ## Web Part Configuration Properties
 
 - `apiBaseUrl`: Function App base URL (e.g. `http://localhost:7071` or `https://<app>.azurewebsites.net`).
-- `functionKey`: Optional function key retained in Web Part properties for local/operational compatibility; build-time environment files never inject it into a production bundle, and it is not a production authentication fallback.
-- `backendClientId`: Entra backend App Registration client ID. The default is `026e9069-414c-4df4-8513-bdeb9ff301d2`. Older saved `backendAppIdUri` values are normalized during migration.
+- `backendClientId`: Entra backend App Registration client ID. Older saved `backendAppIdUri` values are normalized during migration.
 - `useMockData`: Toggles mock service providers for local UI testing without a live backend.
 - `pollIntervalMs`: Durable Functions orchestration polling interval in milliseconds.
 - `enableDebugLogs`: Enables verbose request logging in the browser developer console.
@@ -58,24 +57,24 @@ x-mag-trace-id: <client-generated-trace-id>
 
 ## Production Entra Authentication
 
-The SPFx token provider must receive the bare backend client ID, not an App ID URI, delegated scope, or `/.default` value. A shared authentication boundary owns the actual `fetch` and XHR transports for pipeline, graph, report, timeline, and chat calls. For every non-loopback API URL, token acquisition and a final Bearer-header assertion complete before the native network primitive is invoked; failures surface a sanitized security error in the console and UI. Exact HTTP(S) `localhost`, `127.0.0.1`, and `::1` URLs retain function-key-only local compatibility.
+The SPFx token provider must receive the bare backend client ID, not an App ID URI, delegated scope, or `/.default` value. A shared authentication boundary owns the actual `fetch` and XHR transports for pipeline, graph, report, timeline, and chat calls. For every non-loopback API URL, token acquisition and a final Bearer-header assertion complete before the native network primitive is invoked; failures surface a sanitized security error in the console and UI. Exact HTTP(S) `localhost`, `127.0.0.1`, and `::1` URLs remain tokenless for local development, where the backend must explicitly set `REQUIRE_ENTRA_AUTH=false`.
 
 Configure the Function App with the authentication settings already used by the repository's `.env`:
 
 ```text
 REQUIRE_ENTRA_AUTH=true
 AZURE_Tenant_ID=<tenant-guid>
-AZURE_CLIENT_ID=026e9069-414c-4df4-8513-bdeb9ff301d2
-AZURE_Application_ID_URI=api://026e9069-414c-4df4-8513-bdeb9ff301d2
+AZURE_CLIENT_ID=
+AZURE_Application_ID_URI=api://
 ```
 
-The backend requires the fixed delegated scope `user_impersonation`; it is not an additional environment setting. Production must keep `REQUIRE_ENTRA_AUTH=true`; a function key does not replace Entra JWT validation. The Web Part property and built-in client-ID default provide the frontend configuration.
+The backend requires the fixed delegated scope `user_impersonation`; it is not an additional environment setting. Production must keep `REQUIRE_ENTRA_AUTH=true`; omitting the setting also fails closed. The Web Part property and built-in client-ID default provide the frontend configuration.
 
-Before deployment, DevOps must confirm that the backend registration exposes delegated scope `user_impersonation`, that its client ID and Application ID URI match the values above, and that admin consent was granted to the actual SPFx calling service principal. This staged package intentionally has no `webApiPermissionRequests` entry. If the bare-client-ID request still fails after that consent, add a request whose `resource` is the backend App Registration's exact Entra **display name**, redeploy, and approve it in SharePoint API Access. Never place a GUID in `resource`.
+The package requests `user_impersonation` from the backend resource display name `MAG-Agent-Backend-API`. Before packaging, DevOps must confirm that this remains the exact display name of service principal ``. Deploy the package and approve its pending permission in SharePoint Admin Center API access; never replace `resource` with a client or object GUID.
 
-The Function code owns JWT validation. Configure [App Service Authentication](https://learn.microsoft.com/azure/app-service/overview-authentication-authorization#authorization-behavior) to allow unauthenticated requests through to the Function and keep `REQUIRE_ENTRA_AUTH=true`; this prevents Easy Auth from returning an empty platform 401 before `@require_token_auth` runs. The application-level 401 contains a JSON body, while an empty 401 with `WWW-Authenticate` indicates that the platform gate is still intercepting the request.
+Easy Auth owns issuer, tenant, audience, signature, and calling-client validation. The Function reads its trusted `X-MS-CLIENT-PRINCIPAL` header and enforces `user_impersonation`. Configure Easy Auth to require authentication with a `401` response, exclude only `/api/ping`, and allowlist the tenant's SharePoint Online Client Extensibility application. See the repository [deployment runbook](../../EASY_AUTH_DEPLOYMENT.md).
 
-For live acceptance, use the deployed SharePoint package and first verify the console fingerprint reports component version `0.1.3` and the new hashed bundle asset. Verify that `pipeline-preflight` contains a Bearer token and returns 200, then exercise upload, orchestration polling, graph/report loading, and chat. Force token acquisition to fail once and confirm that no backend request is created. A manual request without a token must continue to return the application JSON 401. Localhost workbench certificate/loopback failures are tracked separately.
+For live acceptance, use the deployed SharePoint package and first verify the console fingerprint reports component version `0.1.4` and the new hashed bundle asset. Verify that `pipeline-preflight` contains a Bearer token and returns 200, then exercise upload, orchestration polling, graph/report loading, and chat. Force token acquisition to fail once and confirm that no backend request is created. A manual request without a token must return Easy Auth `401`; a valid token without the delegated scope must return application JSON `403`.
 
 ## Quality & Type Checks
 

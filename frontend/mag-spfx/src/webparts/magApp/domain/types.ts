@@ -318,7 +318,6 @@ export interface ChatOperation {
 
 export interface MagAppConfig {
   apiBaseUrl: string;
-  functionKey: string;
   useMockData: boolean;
   pollIntervalMs: number;
   enableDebugLogs: boolean;

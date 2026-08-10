@@ -36,7 +36,7 @@ const responseErrorMessage = async (response: Response): Promise<string> => {
   }
 
   if (response.status === 401) {
-    return 'הבקשה נדחתה בגלל הרשאה חסרה או מפתח פונקציה לא תקין (401).';
+    return 'הבקשה נדחתה בגלל אימות Entra חסר או לא תקין (401).';
   }
 
   if (isHtmlResponse(body, response.headers.get('content-type'))) {

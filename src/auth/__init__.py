@@ -1,6 +1,15 @@
-"""Authentication module for Entra ID JWT validation and request decoration."""
+"""Authentication helpers for Azure Easy Auth identity and scope authorization."""
 
-from src.auth.jwt_validator import get_jwks_client, validate_bearer_token
-from src.auth.decorators import require_token_auth
+from src.auth.decorators import require_authenticated_scope
+from src.auth.easy_auth import (
+    PrincipalAuthenticationError,
+    get_authenticated_principal,
+    has_required_scope,
+)
 
-__all__ = ["get_jwks_client", "validate_bearer_token", "require_token_auth"]
+__all__ = [
+    "PrincipalAuthenticationError",
+    "get_authenticated_principal",
+    "has_required_scope",
+    "require_authenticated_scope",
+]

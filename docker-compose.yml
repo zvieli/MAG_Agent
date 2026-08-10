@@ -33,10 +33,10 @@ services:
       AZURE_CLIENT_ID: "${AZURE_CLIENT_ID:-}"
       AZURE_Application_ID_URI: "${AZURE_Application_ID_URI:-}"
       CORS_ALLOWED_ORIGINS: '["https://tikshuv.sharepoint.com", "https://localhost:4321"]'
-      CORS_SUPPORT_CREDENTIALS: "true"
+      CORS_SUPPORT_CREDENTIALS: "false"
       AzureFunctionsJobHost__Host__CORS__0: "https://tikshuv.sharepoint.com"
       AzureFunctionsJobHost__Host__CORS__1: "https://localhost:4321"
-      AzureFunctionsJobHost__Host__CORSCredentials: "true"
+      AzureFunctionsJobHost__Host__CORSCredentials: "false"
       AZURE_FUNCTIONS_ENVIRONMENT: "Development"
       ASPNETCORE_ENVIRONMENT: "Development"
       FUNCTIONS_WORKER_RUNTIME: "python"

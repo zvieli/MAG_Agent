@@ -55,18 +55,15 @@ export const isLoopbackApiUrl = (apiBaseUrl: string): boolean => {
 
 export class BackendAuthService {
   public readonly mode: BackendAuthMode;
-  private readonly functionKey: string;
   private readonly tokenService: TokenService;
   private readonly logger?: DebugLogger;
 
   public constructor(
     apiBaseUrl: string,
-    functionKey: string,
     tokenService: TokenService,
     logger?: DebugLogger
   ) {
     this.mode = isLoopbackApiUrl(apiBaseUrl) ? 'loopback' : 'entra';
-    this.functionKey = functionKey;
     this.tokenService = tokenService;
     this.logger = logger;
   }
@@ -136,9 +133,6 @@ export class BackendAuthService {
         throw this.authenticationFailure(error, context, 'token-acquisition-failed');
       }
     }
-
-    const normalizedFunctionKey = this.functionKey?.trim();
-    if (normalizedFunctionKey) headers.set('x-functions-key', normalizedFunctionKey);
 
     this.assertRequestIsAuthorized(context, mode, headers);
     return { headers, mode };

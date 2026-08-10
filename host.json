@@ -25,14 +25,21 @@
     "http": {
       "cors": {
         "allowedOrigins": [
-          "https://tikshuv.sharepoint.com",
-          "*"
+          "https://tikshuv.sharepoint.com"
         ],
         "allowedHeaders": [
           "Authorization",
           "Content-Type",
-          "x-functions-key",
-          "*"
+          "Content-Disposition",
+          "x-mag-file-name",
+          "x-mag-trace-id",
+          "Cache-Control",
+          "Pragma"
+        ],
+        "allowedMethods": [
+          "GET",
+          "POST",
+          "OPTIONS"
         ],
         "supportCredentials": false
       }

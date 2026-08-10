@@ -16,7 +16,6 @@ import { DEFAULT_BACKEND_CLIENT_ID } from './services/TokenService';
 
 export interface IMagAppWebPartProps {
   apiBaseUrl: string;
-  functionKey: string;
   useMockData: boolean;
   pollIntervalMs: number;
   enableDebugLogs: boolean;
@@ -81,7 +80,6 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
       }
     }
 
-    let functionKey = this.properties.functionKey || '';
     let useMockData = this.properties.useMockData === true;
     let pollIntervalMs = this.properties.pollIntervalMs || 3000;
 
@@ -102,7 +100,6 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
 
     const config: MagAppConfig = {
       apiBaseUrl,
-      functionKey,
       useMockData,
       pollIntervalMs,
       enableDebugLogs: this.properties.enableDebugLogs === true,
@@ -142,10 +139,6 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
                 PropertyPaneTextField('apiBaseUrl', {
                   label: strings.ApiBaseUrlFieldLabel,
                   placeholder: 'https://<function-app>.azurewebsites.net'
-                }),
-                PropertyPaneTextField('functionKey', {
-                  label: strings.FunctionKeyFieldLabel,
-                  placeholder: 'הדבק מפתח בדיקה'
                 }),
                 PropertyPaneTextField('backendClientId', {
                   label: 'Backend App Client ID',

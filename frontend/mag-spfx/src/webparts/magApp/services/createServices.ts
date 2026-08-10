@@ -27,7 +27,6 @@ export const createServices = (config: MagAppConfig, spHttpClient: SPHttpClient)
   );
   const backendAuth = new BackendAuthService(
     config.apiBaseUrl,
-    config.functionKey,
     tokenService,
     logger
   );

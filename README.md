@@ -115,14 +115,9 @@ Override the PDF or trace ID:
 PDF_PATH="data/my_case.pdf" TRACE_ID="pipeline-local-$(date +%s)" scripts/run_pipeline.sh
 ```
 
-Cloud runner:
-
-```bash
-AZURE_FUNCTION_APP_URL="https://<app>.azurewebsites.net" \
-AZURE_FUNCTION_APP_KEY="<function-key>" \
-PDF_PATH="data/my_case.pdf" \
-scripts/run_pipeline_cloud.sh
-```
+Production pipeline runs are initiated through the deployed SPFx web part. Direct
+cloud automation is intentionally unsupported because Easy Auth allowlists the
+SharePoint Online Client Extensibility application.
 
 ### Query Agent Test
 
@@ -160,8 +155,8 @@ curl -sS "http://localhost:7071/api/pipelines/${INSTANCE_ID}" \
 
 Primary endpoints:
 
-- `GET /api/ping`
-- `GET /api/health`
+- `GET /api/ping` (public liveness only)
+- `GET /api/health` (Entra-authenticated dependency diagnostics)
 - `GET /api/debug_logs` (enabled in local/dev or with `MAG_ENABLE_DEBUG_LOGS=true`)
 - `POST /api/pipelines`
 - `GET /api/pipeline-preflight?filename=<filename>`
@@ -179,6 +174,10 @@ All pipeline and query requests send:
 ```http
 x-mag-trace-id: <client-generated-trace-id>
 ```
+
+Every endpoint except `/api/ping` requires an Easy Auth principal carrying the
+delegated `user_impersonation` scope. Production deployment and rollback steps are
+documented in [EASY_AUTH_DEPLOYMENT.md](EASY_AUTH_DEPLOYMENT.md).
 
 ---
 

@@ -1,21 +1,27 @@
-"""Decorator for enforcing JWT Bearer token authentication on Azure Functions handlers."""
+"""Decorator for enforcing Easy Auth identity and delegated scope authorization."""
 
 import asyncio
 import functools
 import json
-from typing import Any, Callable, Dict
+from typing import Any, Callable
 
 import azure.functions as func
-from src.auth.jwt_validator import validate_bearer_token
+from src.auth.easy_auth import (
+    PrincipalAuthenticationError,
+    get_authenticated_principal,
+    has_required_scope,
+)
+from src.utils.cors import cors_headers_for_request
 
 
-def require_token_auth(fn: Callable[..., Any]) -> Callable[..., Any]:
-    """Decorator for Azure Functions HTTP handlers to validate JWT tokens.
+def require_authenticated_scope(fn: Callable[..., Any]) -> Callable[..., Any]:
+    """Require a trusted Easy Auth principal with ``user_impersonation``.
 
     Allows OPTIONS requests to pass through without authentication.
-    Validates token via validate_bearer_token. Returns 401 JSON response with CORS headers if invalid.
-    Attaches claims to req.user_claims if valid.
+    Returns 401 for missing/invalid principals and 403 for insufficient scope.
+    Attaches normalized claims to req.user_claims when authorized.
     """
+
     def _extract_req(args: tuple, kwargs: dict) -> Any:
         req = kwargs.get("req")
         if req is not None:
@@ -25,27 +31,25 @@ def require_token_auth(fn: Callable[..., Any]) -> Callable[..., Any]:
                 return arg
         return args[0] if args else None
 
-    def _build_cors_headers(req: Any) -> Dict[str, str]:
-        origin = "*"
-        if req and hasattr(req, "headers"):
-            origin = req.headers.get("origin") or req.headers.get("Origin") or "*"
-        return {
-            "Access-Control-Allow-Origin": origin,
-            "Access-Control-Allow-Headers": "Authorization, Content-Type, x-functions-key",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
-        }
-
-    def _unauthorized_response(req: Any, message: str = "Invalid or missing Bearer token") -> func.HttpResponse:
-        body = json.dumps({"error": "Unauthorized", "message": message})
-        headers = _build_cors_headers(req)
+    def _error_response(
+        req: Any, status_code: int, error: str, message: str
+    ) -> func.HttpResponse:
+        body = json.dumps({"error": error, "message": message})
         return func.HttpResponse(
             body,
-            status_code=401,
+            status_code=status_code,
             mimetype="application/json",
-            headers=headers,
+            headers=cors_headers_for_request(req),
         )
 
+    def _authorize(req: Any) -> dict:
+        principal = get_authenticated_principal(req)
+        if not has_required_scope(principal):
+            raise PermissionError("Required delegated scope is missing")
+        return principal
+
     if asyncio.iscoroutinefunction(fn):
+
         @functools.wraps(fn)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
             req = _extract_req(args, kwargs)
@@ -53,17 +57,25 @@ def require_token_auth(fn: Callable[..., Any]) -> Callable[..., Any]:
                 return await fn(*args, **kwargs)
 
             if req is None:
-                return _unauthorized_response(None, "HTTP request object not found")
+                return _error_response(None, 401, "Unauthorized", "HTTP request object not found")
 
-            payload = validate_bearer_token(req)
-            if payload is None:
-                return _unauthorized_response(req)
+            try:
+                principal = _authorize(req)
+            except PrincipalAuthenticationError:
+                return _error_response(
+                    req, 401, "Unauthorized", "Invalid or missing authenticated principal"
+                )
+            except PermissionError:
+                return _error_response(
+                    req, 403, "Forbidden", "Required delegated scope is missing"
+                )
 
-            setattr(req, "user_claims", payload)
+            setattr(req, "user_claims", principal)
             return await fn(*args, **kwargs)
 
         return async_wrapper
     else:
+
         @functools.wraps(fn)
         def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
             req = _extract_req(args, kwargs)
@@ -71,13 +83,20 @@ def require_token_auth(fn: Callable[..., Any]) -> Callable[..., Any]:
                 return fn(*args, **kwargs)
 
             if req is None:
-                return _unauthorized_response(None, "HTTP request object not found")
+                return _error_response(None, 401, "Unauthorized", "HTTP request object not found")
 
-            payload = validate_bearer_token(req)
-            if payload is None:
-                return _unauthorized_response(req)
+            try:
+                principal = _authorize(req)
+            except PrincipalAuthenticationError:
+                return _error_response(
+                    req, 401, "Unauthorized", "Invalid or missing authenticated principal"
+                )
+            except PermissionError:
+                return _error_response(
+                    req, 403, "Forbidden", "Required delegated scope is missing"
+                )
 
-            setattr(req, "user_claims", payload)
+            setattr(req, "user_claims", principal)
             return fn(*args, **kwargs)
 
         return sync_wrapper
