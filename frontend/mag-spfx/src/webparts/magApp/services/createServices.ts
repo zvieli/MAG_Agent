@@ -21,7 +21,7 @@ export const createServices = (config: MagAppConfig, spHttpClient: SPHttpClient)
 
   const tokenService = new TokenService(
     config.aadTokenProviderFactory,
-    config.backendAppIdUri,
+    config.backendClientId || config.backendAppIdUri,
     logger
   );
 

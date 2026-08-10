@@ -36,11 +36,20 @@ build.configureWebpack.mergeConfig({
       console.warn(`[gulpfile.js] Environment file not found at ${envPath}`);
     }
 
+    const publicClientEnvironmentKeys = new Set([
+      'VITE_USE_LOCAL_DOCKER',
+      'VITE_AZURE_API_TARGET',
+      'VITE_API_TARGET',
+      'VITE_USE_MOCK_DATA',
+      'VITE_POLL_INTERVAL_MS',
+      'VITE_BACKEND_CLIENT_ID',
+      'VITE_BACKEND_APP_ID_URI'
+    ]);
     const definitions = {};
     for (const key in env) {
-      if (Object.prototype.hasOwnProperty.call(env, key)) {
+      if (Object.prototype.hasOwnProperty.call(env, key) && publicClientEnvironmentKeys.has(key)) {
         definitions[`process.env.${key}`] = JSON.stringify(env[key]);
-        console.log(`[gulpfile.js] Defining process.env.${key} = ${JSON.stringify(env[key])}`);
+        console.log(`[gulpfile.js] Defining public client environment variable ${key}`);
       }
     }
 

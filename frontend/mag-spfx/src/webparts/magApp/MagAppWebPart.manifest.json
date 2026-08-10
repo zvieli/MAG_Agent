@@ -32,7 +32,8 @@
         "pollIntervalMs": 5000,
         "enableDebugLogs": true,
         "sharePointSiteUrl": "",
-        "sharePointFolderServerRelativeUrl": ""
+        "sharePointFolderServerRelativeUrl": "",
+        "backendClientId": "026e9069-414c-4df4-8513-bdeb9ff301d2"
       }
     }
   ]

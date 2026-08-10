@@ -11,6 +11,22 @@ from jwt import PyJWKClient
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_REQUIRED_SCOPE = "user_impersonation"
+
+
+def _normalize_app_id_uri(value: str) -> str:
+    """Normalize a configured Application ID URI to a token audience value."""
+    normalized = value.strip().rstrip("/")
+    removed_suffix = True
+    while removed_suffix:
+        removed_suffix = False
+        for suffix in ("/user_impersonation", "/.default"):
+            if normalized.lower().endswith(suffix.lower()):
+                normalized = normalized[: -len(suffix)].rstrip("/")
+                removed_suffix = True
+                break
+    return normalized
+
 
 @functools.lru_cache(maxsize=16)
 def get_jwks_client(tenant_id: str) -> PyJWKClient:
@@ -23,18 +39,41 @@ def validate_bearer_token(req: func.HttpRequest) -> Optional[Dict[str, Any]]:
     """Validate Bearer token from HttpRequest header against Entra ID JWKS.
 
     If REQUIRE_ENTRA_AUTH environment variable is not 'true', returns default dev user payload.
-    Otherwise, decodes token, verifies RS256 signature, audience, and issuer.
+    Otherwise, decodes token, verifies RS256 signature, audience, issuer, and
+    the delegated scope configured by ENTRA_REQUIRED_SCOPE.
     Returns claims dict if valid, or None if invalid/expired/missing.
     """
     require_auth = os.getenv("REQUIRE_ENTRA_AUTH", "false").lower() == "true"
     if not require_auth:
         return {"sub": "dev-user", "name": "Local Development"}
 
-    tenant_id = os.getenv("ENTRA_TENANT_ID") or os.getenv("AZURE_Tenant_ID") or os.getenv("AZURE_TENANT_ID")
-    client_id = os.getenv("ENTRA_BACKEND_CLIENT_ID") or os.getenv("AZURE_CLIENT_ID")
+    tenant_id = (
+        os.getenv("ENTRA_TENANT_ID")
+        or os.getenv("AZURE_Tenant_ID")
+        or os.getenv("AZURE_TENANT_ID")
+    )
+    client_id = (
+        os.getenv("ENTRA_BACKEND_CLIENT_ID")
+        or os.getenv("AZURE_CLIENT_ID")
+    )
+    app_id_uri = (
+        os.getenv("ENTRA_APP_ID_URI")
+        or os.getenv("AZURE_Application_ID_URI")
+        or f"api://{client_id}"
+    )
+    required_scope = os.getenv("ENTRA_REQUIRED_SCOPE", DEFAULT_REQUIRED_SCOPE).strip()
 
-    if not tenant_id or not client_id:
-        logger.warning("ENTRA_TENANT_ID or ENTRA_BACKEND_CLIENT_ID / AZURE_CLIENT_ID not configured")
+    if not tenant_id or not client_id or not required_scope:
+        logger.warning(
+            "Canonical Entra authentication settings are incomplete; expected "
+            "ENTRA_TENANT_ID, ENTRA_BACKEND_CLIENT_ID, ENTRA_APP_ID_URI, and "
+            "ENTRA_REQUIRED_SCOPE (supported Azure aliases remain available)"
+        )
+        return None
+
+    normalized_app_id_uri = _normalize_app_id_uri(app_id_uri)
+    if not normalized_app_id_uri:
+        logger.warning("ENTRA_APP_ID_URI is invalid after audience normalization")
         return None
 
     auth_header = req.headers.get("authorization") or req.headers.get("Authorization")
@@ -61,7 +100,7 @@ def validate_bearer_token(req: func.HttpRequest) -> Optional[Dict[str, Any]]:
             f"https://login.microsoftonline.com/{tenant_id}/v2.0",
             f"https://login.microsoftonline.com/{tenant_id}/v2.0/",
         ]
-        valid_audiences = [client_id, f"api://{client_id}"]
+        valid_audiences = list(dict.fromkeys([client_id, normalized_app_id_uri]))
 
         payload = jwt.decode(
             token,
@@ -69,6 +108,21 @@ def validate_bearer_token(req: func.HttpRequest) -> Optional[Dict[str, Any]]:
             algorithms=["RS256"],
             audience=valid_audiences,
             issuer=valid_issuers,
+        )
+
+        granted_scopes = payload.get("scp")
+        if not isinstance(granted_scopes, str) or required_scope not in granted_scopes.split():
+            logger.warning("JWT validation failed: required delegated scope is missing")
+            return None
+
+        logger.info(
+            "Validated Entra token claims: aud=%s iss=%s tid=%s scp=%s oid=%s ver=%s",
+            payload.get("aud"),
+            payload.get("iss"),
+            payload.get("tid"),
+            granted_scopes,
+            payload.get("oid"),
+            payload.get("ver"),
         )
         return payload
     except jwt.PyJWTError as e:

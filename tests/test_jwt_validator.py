@@ -42,8 +42,11 @@ def test_validate_bearer_token_missing_config(monkeypatch):
     """Test that validate_bearer_token returns None if tenant or client ID is missing."""
     monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
     monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+    monkeypatch.delenv("AZURE_Tenant_ID", raising=False)
+    monkeypatch.delenv("AZURE_TENANT_ID", raising=False)
     monkeypatch.delenv("ENTRA_BACKEND_CLIENT_ID", raising=False)
     monkeypatch.delenv("AZURE_CLIENT_ID", raising=False)
+    monkeypatch.delenv("ENTRA_REQUIRED_SCOPE", raising=False)
 
     req = create_mock_request(headers={"Authorization": "Bearer some-token"})
     result = validate_bearer_token(req)
@@ -76,10 +79,12 @@ def test_validate_bearer_token_invalid_header_format(monkeypatch):
 @patch("src.auth.jwt_validator.get_jwks_client")
 @patch("jwt.decode")
 def test_validate_bearer_token_valid(mock_jwt_decode, mock_get_jwks, monkeypatch):
-    """Test valid JWT token decoding returns expected claims payload."""
+    """A valid v2 delegated token returns its claims payload."""
     monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
     monkeypatch.setenv("ENTRA_TENANT_ID", "tenant-123")
     monkeypatch.setenv("ENTRA_BACKEND_CLIENT_ID", "client-123")
+    monkeypatch.setenv("ENTRA_APP_ID_URI", "api://client-123")
+    monkeypatch.setenv("ENTRA_REQUIRED_SCOPE", "user_impersonation")
 
     mock_jwks_client = MagicMock()
     mock_signing_key = MagicMock()
@@ -90,8 +95,12 @@ def test_validate_bearer_token_valid(mock_jwt_decode, mock_get_jwks, monkeypatch
     expected_payload = {
         "sub": "user-456",
         "name": "Jane Doe",
-        "iss": "https://sts.windows.net/tenant-123/",
+        "iss": "https://login.microsoftonline.com/tenant-123/v2.0",
         "aud": "client-123",
+        "scp": "openid user_impersonation profile",
+        "tid": "tenant-123",
+        "oid": "object-456",
+        "ver": "2.0",
     }
     mock_jwt_decode.return_value = expected_payload
 
@@ -112,6 +121,68 @@ def test_validate_bearer_token_valid(mock_jwt_decode, mock_get_jwks, monkeypatch
             "https://login.microsoftonline.com/tenant-123/v2.0/",
         ],
     )
+
+
+@patch("src.auth.jwt_validator.get_jwks_client")
+@patch("jwt.decode")
+def test_validate_bearer_token_azure_env_vars_and_app_id_uri(
+    mock_jwt_decode, mock_get_jwks, monkeypatch
+):
+    """Azure aliases remain supported and scope-form audiences are normalized."""
+    monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
+    monkeypatch.delenv("ENTRA_TENANT_ID", raising=False)
+    monkeypatch.setenv("AZURE_Tenant_ID", "tenant-azure-alt")
+    monkeypatch.delenv("ENTRA_BACKEND_CLIENT_ID", raising=False)
+    monkeypatch.setenv("AZURE_CLIENT_ID", "client-azure-alt")
+    monkeypatch.delenv("ENTRA_APP_ID_URI", raising=False)
+    monkeypatch.setenv(
+        "AZURE_Application_ID_URI", "api://custom-uri/user_impersonation/.default"
+    )
+
+    mock_jwks_client = MagicMock()
+    mock_signing_key = MagicMock()
+    mock_signing_key.key = "fake-key"
+    mock_jwks_client.get_signing_key_from_jwt.return_value = mock_signing_key
+    mock_get_jwks.return_value = mock_jwks_client
+
+    mock_jwt_decode.return_value = {"sub": "user-1", "scp": "user_impersonation"}
+
+    req = create_mock_request(headers={"Authorization": "Bearer valid-token"})
+    validate_bearer_token(req)
+
+    mock_get_jwks.assert_called_with("tenant-azure-alt")
+    call_kwargs = mock_jwt_decode.call_args.kwargs
+    assert call_kwargs["audience"] == ["client-azure-alt", "api://custom-uri"]
+    assert all("user_impersonation" not in audience for audience in call_kwargs["audience"])
+
+
+@patch("src.auth.jwt_validator.get_jwks_client")
+@patch("jwt.decode")
+def test_validate_bearer_token_missing_scope(mock_jwt_decode, mock_get_jwks, monkeypatch):
+    """A signed delegated token without the required scope is rejected."""
+    monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
+    monkeypatch.setenv("ENTRA_TENANT_ID", "tenant-123")
+    monkeypatch.setenv("ENTRA_BACKEND_CLIENT_ID", "client-123")
+    mock_get_jwks.return_value.get_signing_key_from_jwt.return_value.key = "key"
+    mock_jwt_decode.return_value = {"sub": "user-1", "scp": "openid profile"}
+
+    req = create_mock_request(headers={"Authorization": "Bearer valid-token"})
+    assert validate_bearer_token(req) is None
+
+
+@patch("src.auth.jwt_validator.get_jwks_client")
+@patch("jwt.decode")
+def test_validate_bearer_token_wrong_scope(mock_jwt_decode, mock_get_jwks, monkeypatch):
+    """A similarly named scope does not satisfy the exact scope check."""
+    monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
+    monkeypatch.setenv("ENTRA_TENANT_ID", "tenant-123")
+    monkeypatch.setenv("ENTRA_BACKEND_CLIENT_ID", "client-123")
+    monkeypatch.setenv("ENTRA_REQUIRED_SCOPE", "user_impersonation")
+    mock_get_jwks.return_value.get_signing_key_from_jwt.return_value.key = "key"
+    mock_jwt_decode.return_value = {"sub": "user-1", "scp": "user_impersonation.read"}
+
+    req = create_mock_request(headers={"Authorization": "Bearer valid-token"})
+    assert validate_bearer_token(req) is None
 
 
 @patch("src.auth.jwt_validator.get_jwks_client")
@@ -146,6 +217,20 @@ def test_validate_bearer_token_wrong_audience(mock_jwt_decode, mock_get_jwks, mo
     req = create_mock_request(headers={"Authorization": "Bearer wrong-aud-token"})
     result = validate_bearer_token(req)
     assert result is None
+
+
+@patch("src.auth.jwt_validator.get_jwks_client")
+@patch("jwt.decode")
+def test_validate_bearer_token_wrong_issuer(mock_jwt_decode, mock_get_jwks, monkeypatch):
+    """A token issued by another tenant is rejected."""
+    monkeypatch.setenv("REQUIRE_ENTRA_AUTH", "true")
+    monkeypatch.setenv("ENTRA_TENANT_ID", "tenant-123")
+    monkeypatch.setenv("ENTRA_BACKEND_CLIENT_ID", "client-123")
+    mock_get_jwks.return_value.get_signing_key_from_jwt.return_value.key = "key"
+    mock_jwt_decode.side_effect = jwt.InvalidIssuerError("Issuer invalid")
+
+    req = create_mock_request(headers={"Authorization": "Bearer wrong-issuer-token"})
+    assert validate_bearer_token(req) is None
 
 
 # --- Decorator Tests ---

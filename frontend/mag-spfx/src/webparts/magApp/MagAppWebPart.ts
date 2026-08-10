@@ -12,6 +12,7 @@ import { BaseClientSideWebPart } from '@microsoft/sp-webpart-base';
 import * as strings from 'MagAppWebPartStrings';
 import { MagApp } from './components/MagApp';
 import { MagAppConfig } from './domain/types';
+import { DEFAULT_BACKEND_CLIENT_ID } from './services/TokenService';
 
 export interface IMagAppWebPartProps {
   apiBaseUrl: string;
@@ -21,6 +22,8 @@ export interface IMagAppWebPartProps {
   enableDebugLogs: boolean;
   sharePointSiteUrl: string;
   sharePointFolderServerRelativeUrl: string;
+  backendClientId?: string;
+  /** @deprecated Read temporarily so existing SharePoint pages keep working. */
   backendAppIdUri?: string;
 }
 
@@ -28,9 +31,9 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
   public render(): void {
     let isLocalDocker = false;
     let envApiTarget: string | undefined = undefined;
-    let envFunctionKey: string | undefined = undefined;
     let envUseMockData: string | undefined = undefined;
     let envPollIntervalMs: string | undefined = undefined;
+    let envBackendClientId: string | undefined = undefined;
     let envBackendAppIdUri: string | undefined = undefined;
 
     try {
@@ -42,10 +45,6 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
     } catch (e) { /* process is not defined */ }
 
     try {
-      envFunctionKey = process.env.FUNCTION_KEY;
-    } catch (e) { /* process is not defined */ }
-
-    try {
       envUseMockData = process.env.VITE_USE_MOCK_DATA;
     } catch (e) { /* process is not defined */ }
 
@@ -54,7 +53,8 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
     } catch (e) { /* process is not defined */ }
 
     try {
-      envBackendAppIdUri = process.env.VITE_BACKEND_APP_ID_URI || process.env.AZURE_Application_ID_URI;
+      envBackendClientId = process.env.VITE_BACKEND_CLIENT_ID;
+      envBackendAppIdUri = process.env.VITE_BACKEND_APP_ID_URI;
     } catch (e) { /* process is not defined */ }
 
     let apiBaseUrl = this.properties.apiBaseUrl || '';
@@ -68,7 +68,7 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
       }
     }
 
-    let functionKey = this.properties.functionKey || envFunctionKey || '';
+    let functionKey = this.properties.functionKey || '';
     let useMockData = this.properties.useMockData === true;
     let pollIntervalMs = this.properties.pollIntervalMs || 3000;
 
@@ -96,7 +96,12 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
       sharePointSiteUrl: this.properties.sharePointSiteUrl || currentWebUrl,
       sharePointFolderServerRelativeUrl:
         this.properties.sharePointFolderServerRelativeUrl || `${cleanWebRelativeUrl}/Shared Documents`,
-      backendAppIdUri: this.properties.backendAppIdUri || envBackendAppIdUri,
+      backendClientId:
+        this.properties.backendClientId?.trim() ||
+        envBackendClientId?.trim() ||
+        this.properties.backendAppIdUri?.trim() ||
+        envBackendAppIdUri?.trim() ||
+        DEFAULT_BACKEND_CLIENT_ID,
       aadTokenProviderFactory: this.context.aadTokenProviderFactory
     };
 
@@ -131,9 +136,9 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
                   label: strings.FunctionKeyFieldLabel,
                   placeholder: 'הדבק מפתח בדיקה'
                 }),
-                PropertyPaneTextField('backendAppIdUri', {
-                  label: 'Entra ID Backend App ID URI',
-                  placeholder: 'api://<backend-app-id>'
+                PropertyPaneTextField('backendClientId', {
+                  label: 'Backend App Client ID',
+                  placeholder: DEFAULT_BACKEND_CLIENT_ID
                 }),
                 PropertyPaneToggle('useMockData', {
                   label: strings.UseMockDataFieldLabel,

@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "es2017",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": false,
+    "outDir": "temp/auth-tests",
+    "rootDir": ".",
+    "types": ["webpack-env", "jest"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "test/**/*.test.ts"
+  ]
+}

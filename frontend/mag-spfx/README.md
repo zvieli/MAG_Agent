@@ -35,7 +35,8 @@ https://<tenant>.sharepoint.com/_layouts/15/workbench.aspx?debugManifestsFile=ht
 ## Web Part Configuration Properties
 
 - `apiBaseUrl`: Function App base URL (e.g. `http://localhost:7071` or `https://<app>.azurewebsites.net`).
-- `functionKey`: Function App API key for authenticated endpoints.
+- `functionKey`: Optional function key retained in Web Part properties for local/operational compatibility; build-time environment files never inject it into a production bundle, and it is not a production authentication fallback.
+- `backendClientId`: Entra backend App Registration client ID. The default is `026e9069-414c-4df4-8513-bdeb9ff301d2`. Older saved `backendAppIdUri` values are normalized during migration.
 - `useMockData`: Toggles mock service providers for local UI testing without a live backend.
 - `pollIntervalMs`: Durable Functions orchestration polling interval in milliseconds.
 - `enableDebugLogs`: Enables verbose request logging in the browser developer console.
@@ -55,9 +56,32 @@ All requests pass the client trace ID header:
 x-mag-trace-id: <client-generated-trace-id>
 ```
 
+## Production Entra Authentication
+
+The SPFx token provider must receive the bare backend client ID, not an App ID URI, delegated scope, or `/.default` value. In live mode, token acquisition failures stop the backend request and surface an authentication error; the client never retries the request without a Bearer token.
+
+Configure the Function App with these canonical settings:
+
+```text
+REQUIRE_ENTRA_AUTH=true
+ENTRA_TENANT_ID=<tenant-guid>
+ENTRA_BACKEND_CLIENT_ID=026e9069-414c-4df4-8513-bdeb9ff301d2
+ENTRA_APP_ID_URI=api://026e9069-414c-4df4-8513-bdeb9ff301d2
+ENTRA_REQUIRED_SCOPE=user_impersonation
+```
+
+The existing `AZURE_Tenant_ID`/`AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, and `AZURE_Application_ID_URI` aliases remain supported during migration. Production must keep `REQUIRE_ENTRA_AUTH=true`; a function key does not replace Entra JWT validation.
+
+Before deployment, DevOps must confirm that the backend registration exposes delegated scope `user_impersonation`, that its client ID and Application ID URI match the values above, and that admin consent was granted to the actual SPFx calling service principal. This staged package intentionally has no `webApiPermissionRequests` entry. If the bare-client-ID request still fails after that consent, add a request whose `resource` is the backend App Registration's exact Entra **display name**, redeploy, and approve it in SharePoint API Access. Never place a GUID in `resource`.
+
+For live acceptance, use the deployed SharePoint package and verify that `pipeline-preflight` contains a Bearer token and returns 200, then exercise upload, orchestration polling, graph/report loading, and chat. A request without a token must continue to return 401. Localhost workbench certificate/loopback failures are tracked separately.
+
 ## Quality & Type Checks
 
 ```bash
 ./node_modules/.bin/tsc --noEmit
+npm run test:auth
 npm run build
+npm run bundle -- --ship
+npm run package-solution -- --ship
 ```
