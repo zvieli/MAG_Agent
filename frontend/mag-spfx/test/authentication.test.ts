@@ -6,12 +6,11 @@ import { GraphService } from '../src/webparts/magApp/services/GraphService';
 import { PipelineService } from '../src/webparts/magApp/services/PipelineService';
 import { ReportService } from '../src/webparts/magApp/services/ReportService';
 import {
-  DEFAULT_BACKEND_CLIENT_ID,
   ENTRA_AUTHENTICATION_FAILED,
   EntraAuthenticationError,
   TokenService,
   isEntraAuthenticationError,
-  normalizeBackendClientId
+  normalizeBackendResource
 } from '../src/webparts/magApp/services/TokenService';
 
 const logger = {
@@ -23,6 +22,8 @@ const logger = {
 };
 
 const cloudUrl = 'https://function.example';
+const backendClientId = '026e9069-414c-4df4-8513-bdeb9ff301d2';
+const backendResource = `api://${backendClientId}`;
 
 const tokenServiceWith = (getAccessToken: jest.Mock): TokenService => ({
   getAccessToken
@@ -67,35 +68,40 @@ describe('SPFx Entra authentication', () => {
     ])).toBeUndefined();
   });
 
-  it('passes the bare backend client ID unchanged to getToken', async () => {
+  it('passes the exact backend App ID URI to getToken', async () => {
     const getToken = jest.fn().mockResolvedValue('access-token');
     const factory = {
       getTokenProvider: jest.fn().mockResolvedValue({ getToken })
     };
-    const service = new TokenService(factory as any, DEFAULT_BACKEND_CLIENT_ID, logger);
+    const service = new TokenService(factory as any, backendResource, logger);
 
     await expect(service.getAccessToken()).resolves.toBe('access-token');
     expect(getToken).toHaveBeenCalledTimes(1);
-    expect(getToken).toHaveBeenCalledWith(DEFAULT_BACKEND_CLIENT_ID);
+    expect(getToken).toHaveBeenCalledWith(backendResource);
   });
 
   it.each([
-    ['026e9069-414c-4df4-8513-bdeb9ff301d2', DEFAULT_BACKEND_CLIENT_ID],
-    ['api://026e9069-414c-4df4-8513-bdeb9ff301d2', DEFAULT_BACKEND_CLIENT_ID],
-    ['api://026e9069-414c-4df4-8513-bdeb9ff301d2/user_impersonation', DEFAULT_BACKEND_CLIENT_ID],
-    ['api://026e9069-414c-4df4-8513-bdeb9ff301d2/.default', DEFAULT_BACKEND_CLIENT_ID],
-    ['api://026e9069-414c-4df4-8513-bdeb9ff301d2/user_impersonation/.default', DEFAULT_BACKEND_CLIENT_ID]
+    [backendClientId, backendResource],
+    [backendResource, backendResource],
+    [`${backendResource}/user_impersonation`, backendResource],
+    [`${backendResource}/.default`, backendResource],
+    [`${backendResource}/user_impersonation/.default`, backendResource],
+    [`${backendResource}/`, backendResource]
   ])('normalizes legacy backend value %s', (configured, expected) => {
-    expect(normalizeBackendClientId(configured)).toBe(expected);
+    expect(normalizeBackendResource(configured)).toBe(expected);
   });
 
-  it('rejects invalid configuration before asking SPFx for a provider', async () => {
+  it.each([
+    ['api://not-a-client-id/user_impersonation', 'invalid-backend-resource'],
+    ['https://function.example', 'invalid-backend-resource'],
+    ['', 'missing-backend-resource']
+  ])('rejects invalid backend resource %s before asking SPFx for a provider', async (resource, reason) => {
     const factory = { getTokenProvider: jest.fn() };
-    const service = new TokenService(factory as any, 'api://not-a-client-id/user_impersonation', logger);
+    const service = new TokenService(factory as any, resource, logger);
 
     await expect(service.getAccessToken()).rejects.toMatchObject({
       code: ENTRA_AUTHENTICATION_FAILED,
-      reason: 'invalid-backend-client-id'
+      reason
     });
     expect(factory.getTokenProvider).not.toHaveBeenCalled();
   });
@@ -115,6 +121,87 @@ describe('SPFx Entra authentication', () => {
     expect(headers.get('Authorization')).toBe('Bearer access-token');
     expect(headers.has('x-functions-key')).toBe(false);
     expect(headers.get('x-mag-trace-id')).toBe('trace-1');
+  });
+
+  it.each([
+    [401, 'backend-token-audience-or-issuer-rejected'],
+    [403, 'backend-scope-or-client-application-rejected']
+  ])('maps fetch status %s to a sanitized Entra authentication error', async (status, reason) => {
+    const backendAuth = new BackendAuthService(
+      cloudUrl,
+      tokenServiceWith(jest.fn().mockResolvedValue('access-token')),
+      logger
+    );
+    const responseText = jest.fn();
+    window.fetch = jest.fn().mockResolvedValue({
+      ok: false,
+      status,
+      url: `${cloudUrl}/api/pipeline-preflight`,
+      text: responseText,
+      headers: {
+        get: jest.fn((name: string) => name === 'x-ms-request-id' ? 'request-123' : null)
+      }
+    });
+
+    await expect(backendAuth.fetch({
+      operation: 'pipeline-preflight',
+      url: `${cloudUrl}/api/pipeline-preflight`
+    })).rejects.toMatchObject({
+      code: ENTRA_AUTHENTICATION_FAILED,
+      status,
+      reason,
+      correlationId: 'request-123'
+    });
+
+    expect(responseText).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith('Backend authentication response rejected', {
+      status,
+      reason,
+      correlationId: 'request-123',
+      operation: 'pipeline-preflight',
+      targetHost: 'function.example'
+    });
+  });
+
+  it('maps an XHR 403 to the same fail-closed Entra error without exposing its body', async () => {
+    const backendAuth = new BackendAuthService(
+      cloudUrl,
+      tokenServiceWith(jest.fn().mockResolvedValue('access-token')),
+      logger
+    );
+    const service = new PipelineService(cloudUrl, backendAuth, logger);
+    window.fetch = jest.fn().mockResolvedValue({
+      ...duplicateResponse(),
+      json: jest.fn().mockResolvedValue({ status: 'new', doc_id: 'case' }),
+      status: 200
+    });
+
+    const originalXhr = window.XMLHttpRequest;
+    const xhr: any = {
+      upload: {},
+      status: 403,
+      responseText: 'sensitive platform response body',
+      open: jest.fn(),
+      setRequestHeader: jest.fn(),
+      getResponseHeader: jest.fn((name: string) => name === 'x-correlation-id' ? 'xhr-request-456' : null),
+      send: jest.fn(function (this: any) {
+        this.onload();
+      })
+    };
+    (window as any).XMLHttpRequest = jest.fn(() => xhr);
+
+    try {
+      const promise = service.uploadAndStart(new File(['pdf'], 'case.pdf', { type: 'application/pdf' }));
+      await expect(promise).rejects.toMatchObject({
+        code: ENTRA_AUTHENTICATION_FAILED,
+        status: 403,
+        reason: 'backend-scope-or-client-application-rejected',
+        correlationId: 'xhr-request-456'
+      });
+      expect(JSON.stringify(logger.error.mock.calls)).not.toContain('sensitive platform response body');
+    } finally {
+      window.XMLHttpRequest = originalXhr;
+    }
   });
 
   it.each([
@@ -319,7 +406,7 @@ describe('SPFx Entra authentication', () => {
       new Error(`AADSTS65001: secret-token-value correlation_id: ${correlationId}`)
     );
     const factory = { getTokenProvider: jest.fn().mockResolvedValue({ getToken }) };
-    const tokenService = new TokenService(factory as any, DEFAULT_BACKEND_CLIENT_ID, logger);
+    const tokenService = new TokenService(factory as any, backendResource, logger);
     const backendAuth = new BackendAuthService(cloudUrl, tokenService, logger);
     const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
 

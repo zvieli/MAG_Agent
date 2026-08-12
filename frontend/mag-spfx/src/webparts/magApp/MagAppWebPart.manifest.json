@@ -32,7 +32,7 @@
         "enableDebugLogs": true,
         "sharePointSiteUrl": "",
         "sharePointFolderServerRelativeUrl": "",
-        "backendClientId": "026e9069-414c-4df4-8513-bdeb9ff301d2"
+        "backendResource": "api://026e9069-414c-4df4-8513-bdeb9ff301d2"
       }
     }
   ]

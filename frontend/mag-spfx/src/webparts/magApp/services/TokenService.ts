@@ -1,25 +1,29 @@
 import { AadTokenProviderFactory } from '@microsoft/sp-http';
 import { DebugLogger } from '../domain/debugLogger';
 
-export const DEFAULT_BACKEND_CLIENT_ID = '026e9069-414c-4df4-8513-bdeb9ff301d2';
-
 const clientIdPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
- * Convert persisted App ID URI/scope values from older Web Part versions to the
- * bare Entra application client ID expected by AadTokenProvider.getToken().
+ * Convert persisted client IDs and scoped App ID URIs from older Web Part
+ * versions to the canonical backend App ID URI expected by getToken().
  */
-export const normalizeBackendClientId = (value?: string): string | undefined => {
+export const normalizeBackendResource = (value?: string): string | undefined => {
   if (!value) return undefined;
 
   let normalized = value.trim();
   if (!normalized) return undefined;
 
-  normalized = normalized.replace(/^api:\/\//i, '');
   normalized = normalized.replace(/(?:\/(?:user_impersonation|\.default))+\/?$/i, '');
-  normalized = normalized.replace(/\/$/, '');
+  normalized = normalized.replace(/\/+$/, '');
 
-  return clientIdPattern.test(normalized) ? normalized : undefined;
+  if (clientIdPattern.test(normalized)) {
+    return `api://${normalized.toLowerCase()}`;
+  }
+
+  const appIdUriMatch = normalized.match(/^api:\/\/([0-9a-f-]+)$/i);
+  if (!appIdUriMatch || !clientIdPattern.test(appIdUriMatch[1])) return undefined;
+
+  return `api://${appIdUriMatch[1].toLowerCase()}`;
 };
 
 export const ENTRA_AUTHENTICATION_FAILED = 'ENTRA_AUTHENTICATION_FAILED';
@@ -28,6 +32,7 @@ export interface EntraErrorDetails {
   reason?: string;
   errorCode?: string;
   correlationId?: string;
+  status?: number;
 }
 
 const extractEntraErrorDetails = (error: unknown): EntraErrorDetails => {
@@ -58,6 +63,7 @@ export class EntraAuthenticationError extends Error {
   public readonly reason?: string;
   public readonly errorCode?: string;
   public readonly correlationId?: string;
+  public readonly status?: number;
 
   public constructor(details: EntraErrorDetails = {}) {
     const diagnostic = [details.errorCode, details.correlationId && `correlation ${details.correlationId}`]
@@ -71,6 +77,7 @@ export class EntraAuthenticationError extends Error {
     this.reason = details.reason;
     this.errorCode = details.errorCode;
     this.correlationId = details.correlationId;
+    this.status = details.status;
   }
 }
 
@@ -82,39 +89,42 @@ export const isEntraAuthenticationError = (error: unknown): error is EntraAuthen
 
 export class TokenService {
   private readonly tokenProviderFactory?: AadTokenProviderFactory;
-  private readonly configuredBackendClientId?: string;
-  private readonly backendClientId?: string;
+  private readonly configuredBackendResource?: string;
+  private readonly backendResource?: string;
   private readonly logger?: DebugLogger;
 
   public constructor(
     tokenProviderFactory?: AadTokenProviderFactory,
-    backendClientId: string = DEFAULT_BACKEND_CLIENT_ID,
+    backendResource?: string,
     logger?: DebugLogger
   ) {
     this.tokenProviderFactory = tokenProviderFactory;
-    this.configuredBackendClientId = backendClientId?.trim();
-    this.backendClientId = normalizeBackendClientId(backendClientId);
+    this.configuredBackendResource = backendResource?.trim();
+    this.backendResource = normalizeBackendResource(backendResource);
     this.logger = logger;
   }
 
   public async getAccessToken(): Promise<string> {
     if (!this.tokenProviderFactory) {
-      this.logger?.error('Entra ID authentication is unavailable', { reason: 'missing-token-provider-factory' });
+      this.logger?.error('Entra ID authentication is unavailable', {
+        reason: 'missing-token-provider-factory',
+        operation: 'token-acquisition'
+      });
       throw new EntraAuthenticationError({ reason: 'missing-token-provider-factory' });
     }
 
-    if (!this.backendClientId) {
-      this.logger?.error('Entra ID backend client ID is invalid', {
-        reason: this.configuredBackendClientId ? 'invalid-backend-client-id' : 'missing-backend-client-id'
+    if (!this.backendResource) {
+      const reason = this.configuredBackendResource ? 'invalid-backend-resource' : 'missing-backend-resource';
+      this.logger?.error('Entra ID backend resource is invalid', {
+        reason,
+        operation: 'token-acquisition'
       });
-      throw new EntraAuthenticationError({
-        reason: this.configuredBackendClientId ? 'invalid-backend-client-id' : 'missing-backend-client-id'
-      });
+      throw new EntraAuthenticationError({ reason });
     }
 
     try {
       const provider = await this.tokenProviderFactory.getTokenProvider();
-      const token = await provider.getToken(this.backendClientId);
+      const token = await provider.getToken(this.backendResource);
       if (!token || !token.trim()) {
         throw new Error('empty-token');
       }
@@ -125,9 +135,9 @@ export class TokenService {
         ...extractEntraErrorDetails(error)
       };
       this.logger?.error('Failed to acquire Entra ID access token', {
-        backendClientId: this.backendClientId,
-        errorCode: details.errorCode,
-        correlationId: details.correlationId
+        reason: details.reason,
+        correlationId: details.correlationId,
+        operation: 'token-acquisition'
       });
       throw new EntraAuthenticationError(details);
     }

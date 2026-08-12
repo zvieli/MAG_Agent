@@ -1,9 +1,9 @@
 {
   "name": "mag-spfx",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "private": true,
   "engines": {
-    "node": ">=22.0.0 <23.0.0"
+    "node": ">=22.14.0 <23.0.0"
   },
   "scripts": {
     "build": "gulp build",
@@ -11,7 +11,8 @@
     "dev": "gulp serve-deprecated",
     "package:ship": "gulp clean && gulp bundle --ship && gulp package-solution --ship",
     "package-solution": "gulp package-solution",
-    "test:auth": "tsc -p tsconfig.auth-tests.json && jest --runInBand --config test/jest.config.js",
+    "validate:auth-metadata": "node scripts/validate-auth-metadata.js",
+    "test:auth": "npm run validate:auth-metadata && tsc -p tsconfig.auth-tests.json && jest --runInBand --config test/jest.config.js",
     "serve": "gulp serve-deprecated",
     "trust-cert": "gulp trust-dev-cert"
   },

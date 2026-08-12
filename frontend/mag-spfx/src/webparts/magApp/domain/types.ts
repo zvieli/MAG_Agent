@@ -324,7 +324,9 @@ export interface MagAppConfig {
   sharePointSiteUrl: string;
   sharePointFolderServerRelativeUrl: string;
   aadTokenProviderFactory?: AadTokenProviderFactory;
+  backendResource: string;
+  /** @deprecated Kept only while existing SharePoint pages migrate to backendResource. */
   backendClientId?: string;
-  /** @deprecated Kept while existing SharePoint pages migrate to backendClientId. */
+  /** @deprecated Kept only while existing SharePoint pages migrate to backendResource. */
   backendAppIdUri?: string;
 }

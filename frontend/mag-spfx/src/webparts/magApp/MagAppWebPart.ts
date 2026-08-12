@@ -13,7 +13,6 @@ import * as strings from 'MagAppWebPartStrings';
 import { MagApp } from './components/MagApp';
 import { MagAppConfig } from './domain/types';
 import { findMagAppBundleAsset } from './domain/runtimeFingerprint';
-import { DEFAULT_BACKEND_CLIENT_ID } from './services/TokenService';
 
 export interface IMagAppWebPartProps {
   apiBaseUrl: string;
@@ -22,6 +21,8 @@ export interface IMagAppWebPartProps {
   enableDebugLogs: boolean;
   sharePointSiteUrl: string;
   sharePointFolderServerRelativeUrl: string;
+  backendResource: string;
+  /** @deprecated Read temporarily so existing SharePoint pages keep working. */
   backendClientId?: string;
   /** @deprecated Read temporarily so existing SharePoint pages keep working. */
   backendAppIdUri?: string;
@@ -101,10 +102,11 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
       sharePointSiteUrl: this.properties.sharePointSiteUrl || currentWebUrl,
       sharePointFolderServerRelativeUrl:
         this.properties.sharePointFolderServerRelativeUrl || `${cleanWebRelativeUrl}/Shared Documents`,
-      backendClientId:
-        this.properties.backendClientId?.trim() ||
+      backendResource:
+        this.properties.backendResource?.trim() ||
         this.properties.backendAppIdUri?.trim() ||
-        DEFAULT_BACKEND_CLIENT_ID,
+        this.properties.backendClientId?.trim() ||
+        '',
       aadTokenProviderFactory: this.context.aadTokenProviderFactory
     };
 
@@ -135,9 +137,9 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
                   label: strings.ApiBaseUrlFieldLabel,
                   placeholder: 'https://<function-app>.azurewebsites.net'
                 }),
-                PropertyPaneTextField('backendClientId', {
-                  label: 'Backend App Client ID',
-                  placeholder: DEFAULT_BACKEND_CLIENT_ID
+                PropertyPaneTextField('backendResource', {
+                  label: 'Backend App ID URI',
+                  placeholder: 'api://<backend-client-id>'
                 }),
                 PropertyPaneToggle('useMockData', {
                   label: strings.UseMockDataFieldLabel,

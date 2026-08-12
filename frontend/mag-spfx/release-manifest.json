@@ -1,0 +1,10 @@
+{
+  "packageVersion": "0.1.6",
+  "solutionId": "b071a1d2-aa81-47ac-9849-768c2e54f213",
+  "solutionVersion": "0.1.6.0",
+  "componentId": "59916776-40f5-4f23-9549-aa3ff16f4c87",
+  "packagePath": "sharepoint/solution/mag-spfx.sppkg",
+  "packageSha256": "e460eaffd60a2096f1aa468f8f59c8dd5b4b8b28d789a630714123a2dbb37a90",
+  "bundle": "ClientSideAssets/mag-app-web-part_d8a834c6148c1daa0e78.js",
+  "builtWithNode": "22.23.1"
+}

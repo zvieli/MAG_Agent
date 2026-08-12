@@ -3,7 +3,7 @@ import { DurableStartResponse, DurableStatus, PipelineOperation, PipelineOutput,
 import { DebugLogger, createDebugLogger } from '../domain/debugLogger';
 import { IPipelineService } from './IAppServices';
 import { BackendAuthService, requireBackendAuthService } from './BackendAuthService';
-import { HttpError, apiUrl, readJson } from './http';
+import { HttpError, apiUrl, readJson, throwIfBackendAuthenticationRejected } from './http';
 
 export class PipelineService implements IPipelineService {
   private readonly apiBaseUrl: string;
@@ -130,6 +130,23 @@ export class PipelineService implements IPipelineService {
 
       xhr.onerror = () => reject(new Error('אירעה שגיאת רשת בזמן העלאת הקובץ.'));
       xhr.onload = () => {
+        try {
+          throwIfBackendAuthenticationRejected(xhr.status, {
+            logger: this.logger,
+            traceId,
+            operation: 'pipeline-start',
+            url,
+            correlationId:
+              xhr.getResponseHeader('x-ms-request-id') ||
+              xhr.getResponseHeader('request-id') ||
+              xhr.getResponseHeader('x-correlation-id') ||
+              undefined
+          });
+        } catch (error) {
+          reject(error);
+          return;
+        }
+
         if (xhr.status < 200 || xhr.status >= 300) {
           reject(new Error(xhr.responseText || `שגיאת HTTP ${xhr.status}`));
           return;

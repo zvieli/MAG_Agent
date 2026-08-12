@@ -4,6 +4,7 @@ import {
   TokenService,
   isEntraAuthenticationError
 } from './TokenService';
+import { throwIfBackendAuthenticationRejected } from './http';
 
 export interface BackendRequestContext {
   operation: string;
@@ -78,7 +79,6 @@ export class BackendAuthService {
       : new EntraAuthenticationError({ reason: fallbackReason });
     const details = {
       reason: authenticationError.reason || fallbackReason,
-      errorCode: authenticationError.errorCode,
       correlationId: authenticationError.correlationId,
       operation: context.operation,
       targetHost: targetHostname(context.url) || 'invalid-url'
@@ -138,20 +138,29 @@ export class BackendAuthService {
     return { headers, mode };
   }
 
-  private logAuthorizedRequest(context: BackendRequestContext, mode: BackendAuthMode, headers: Headers): void {
+  private logAuthorizedRequest(context: BackendRequestContext): void {
     this.logger?.info('Backend request authorized for transport', {
       operation: context.operation,
-      targetHost: targetHostname(context.url) || 'invalid-url',
-      authMode: mode,
-      hasBearerToken: Boolean(headers.get('Authorization'))
+      targetHost: targetHostname(context.url) || 'invalid-url'
     });
   }
 
   public async fetch(context: BackendRequestContext, init: RequestInit = {}): Promise<Response> {
     const { headers, mode } = await this.buildHeaders(context, init.headers);
     this.assertRequestIsAuthorized(context, mode, headers);
-    this.logAuthorizedRequest(context, mode, headers);
-    return window.fetch(context.url, { ...init, headers });
+    this.logAuthorizedRequest(context);
+    const response = await window.fetch(context.url, { ...init, headers });
+    throwIfBackendAuthenticationRejected(response.status, {
+      logger: this.logger,
+      operation: context.operation,
+      url: context.url,
+      correlationId:
+        response.headers?.get('x-ms-request-id') ||
+        response.headers?.get('request-id') ||
+        response.headers?.get('x-correlation-id') ||
+        undefined
+    });
+    return response;
   }
 
   public async openAuthenticatedXhr(
@@ -165,7 +174,7 @@ export class BackendAuthService {
     const xhr = new XMLHttpRequest();
     xhr.open(method, context.url);
     headers.forEach((value, key) => xhr.setRequestHeader(key, value));
-    this.logAuthorizedRequest(context, mode, headers);
+    this.logAuthorizedRequest(context);
     return xhr;
   }
 }
