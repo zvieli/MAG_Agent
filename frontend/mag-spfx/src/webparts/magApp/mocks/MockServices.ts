@@ -135,7 +135,7 @@ class MockChatService implements IChatService {
   }
 }
 
-export const createMockServices = (): Omit<IAppServices, 'sharePointFiles'> => ({
+export const createMockServices = (): Omit<IAppServices, 'sharePointFiles' | 'authentication'> => ({
   pipeline: new MockPipelineService(),
   graph: new MockGraphService(),
   report: new MockReportService(),

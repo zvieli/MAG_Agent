@@ -9,6 +9,8 @@ import { GraphPage } from '../pages/GraphPage';
 import { ReportPage } from '../pages/ReportPage';
 import { TimelinePage } from '../pages/TimelinePage';
 import { ChatPage } from '../pages/ChatPage';
+import { AuthenticationGate } from './AuthenticationGate';
+import { isLoopbackApiUrl } from '../services/BackendAuthService';
 
 export interface MagAppProps {
   config: MagAppConfig;
@@ -53,9 +55,12 @@ export const MagApp: React.FC<MagAppProps> = ({ config, spHttpClient }) => {
     }
   };
 
-  return (
+  const application = (
     <PageShell activePage={activePage} session={session} onNavigate={navigate}>
       {renderPage()}
     </PageShell>
   );
+
+  if (config.useMockData || isLoopbackApiUrl(config.apiBaseUrl)) return application;
+  return <AuthenticationGate authentication={services.authentication}>{application}</AuthenticationGate>;
 };

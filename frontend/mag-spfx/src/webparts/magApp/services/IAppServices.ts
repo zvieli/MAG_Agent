@@ -12,6 +12,7 @@ import {
   SPFile,
   TimelineResult
 } from '../domain/types';
+import { IAuthenticationService } from '../auth/AuthenticationService';
 
 export interface IPipelineService {
   uploadAndStart(file: File, onProgress?: (operation: PipelineOperation) => void): Promise<PipelineOperation>;
@@ -47,6 +48,7 @@ export interface ISharePointFileService {
 }
 
 export interface IAppServices {
+  authentication: IAuthenticationService;
   pipeline: IPipelineService;
   graph: IGraphService;
   report: IReportService;

@@ -1,6 +1,6 @@
 import { normalizeApiBaseUrl } from '../domain/guards';
 import { DebugLogger } from '../domain/debugLogger';
-import { EntraAuthenticationError } from './TokenService';
+import { EntraAuthenticationError } from '../auth/AuthenticationService';
 
 export class HttpError extends Error {
   public readonly status: number;

@@ -22,13 +22,19 @@ RELEASE = load_json(SPFX_ROOT / "release-manifest.json")
 PACKAGE_PATH = SPFX_ROOT / RELEASE["packagePath"]
 
 
-def test_spfx_package_requests_backend_delegated_scope():
+def test_spfx_package_uses_independent_msal_client_metadata():
     solution = load_json(SPFX_ROOT / "config" / "package-solution.json")["solution"]
     assert solution["id"] == RELEASE["solutionId"]
     assert solution["version"] == RELEASE["solutionVersion"]
-    assert solution["webApiPermissionRequests"] == [
-        {"resource": "MAG-Agent-Backend-API", "scope": "user_impersonation"}
-    ]
+    assert "webApiPermissionRequests" not in solution
+
+    package = load_json(SPFX_ROOT / "package.json")
+    assert package["dependencies"]["@azure/msal-browser"] == "4.25.1"
+
+    manifest = load_json(
+        SPFX_ROOT / "src" / "webparts" / "magApp" / "MagAppWebPart.manifest.json"
+    )
+    assert manifest["supportedHosts"] == ["SharePointWebPart"]
 
 
 def test_spfx_npm_versions_are_synchronized():
@@ -47,6 +53,27 @@ def test_web_part_manifest_does_not_persist_function_key():
     )
     properties = manifest["preconfiguredEntries"][0]["properties"]
     assert "functionKey" not in properties
+    assert "apiBaseUrl" not in properties
+    assert "backendResource" not in properties
+
+
+def test_authentication_values_are_deployment_configuration_only():
+    source_root = SPFX_ROOT / "src" / "webparts" / "magApp"
+    source = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in source_root.rglob("*")
+        if path.suffix in {".ts", ".tsx"}
+    )
+    assert "AadTokenProvider" not in source
+    assert "aadTokenProviderFactory" not in source
+    for value in (
+        "78820852-55fa-450b-908d-45c0d911e76b",
+        "14b4e437-8b19-4950-9150-a46ab8d626b8",
+        "api://026e9069-414c-4df4-8513-bdeb9ff301d2/user_impersonation",
+        "https://tikshuv.sharepoint.com/_forms/spfxsinglesignon.aspx",
+        "https://login.microsoftonline.com/78820852-55fa-450b-908d-45c0d911e76b",
+    ):
+        assert value not in source
 
 
 def test_release_package_matches_approved_deployment_artifact():
@@ -71,9 +98,7 @@ def test_release_package_matches_approved_deployment_artifact():
             ".//sp:WebApiPermissionRequest",
             namespace,
         )
-        assert [permission.attrib for permission in permissions] == [
-            {"ResourceId": "MAG-Agent-Backend-API", "Scope": "user_impersonation"}
-        ]
+        assert permissions == []
 
         component_file = next(
             name
@@ -87,7 +112,7 @@ def test_release_package_matches_approved_deployment_artifact():
         assert component.attrib["Id"] == RELEASE["componentId"]
         component_manifest = json.loads(component.attrib["ComponentManifest"])
         assert component_manifest["version"] == RELEASE["packageVersion"]
+        assert component_manifest["supportedHosts"] == ["SharePointWebPart"]
         properties = component_manifest["preconfiguredEntries"][0]["properties"]
-        assert properties["backendResource"] == (
-            "api://026e9069-414c-4df4-8513-bdeb9ff301d2"
-        )
+        assert "backendResource" not in properties
+        assert "apiBaseUrl" not in properties

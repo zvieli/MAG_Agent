@@ -117,7 +117,7 @@ PDF_PATH="data/my_case.pdf" TRACE_ID="pipeline-local-$(date +%s)" scripts/run_pi
 
 Production pipeline runs are initiated through the deployed SPFx web part. Direct
 cloud automation is intentionally unsupported because Easy Auth allowlists the
-SharePoint Online Client Extensibility application.
+independent MSAL SPA client used by that Web Part.
 
 ### Query Agent Test
 

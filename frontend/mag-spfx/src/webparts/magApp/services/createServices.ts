@@ -10,30 +10,27 @@ import { ReportService } from './ReportService';
 import { TimelineService } from './TimelineService';
 import { SharePointFileService } from './SharePointFileService';
 import { BackendAuthService } from './BackendAuthService';
-import { TokenService } from './TokenService';
+import { getAuthenticationService } from '../auth/AuthenticationService';
 
 export const createServices = (config: MagAppConfig, spHttpClient: SPHttpClient): IAppServices => {
   const logger = createDebugLogger(config.enableDebugLogs);
   const sharePointFiles = new SharePointFileService(spHttpClient, config.sharePointSiteUrl);
+  const authentication = getAuthenticationService(config.sharePointUserLoginHint, logger);
 
   if (config.useMockData) {
-    return { ...createMockServices(), sharePointFiles };
+    return { ...createMockServices(), authentication, sharePointFiles };
   }
 
-  const tokenService = new TokenService(
-    config.aadTokenProviderFactory,
-    config.backendResource,
-    logger
-  );
   const backendAuth = new BackendAuthService(
     config.apiBaseUrl,
-    tokenService,
+    authentication,
     logger
   );
 
   const graph = new GraphService(config.apiBaseUrl, backendAuth, logger);
 
   return {
+    authentication,
     pipeline: new PipelineService(config.apiBaseUrl, backendAuth, logger),
     graph,
     report: new ReportService(config.apiBaseUrl, backendAuth),

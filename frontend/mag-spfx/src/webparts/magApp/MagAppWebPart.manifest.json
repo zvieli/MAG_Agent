@@ -7,9 +7,7 @@
   "manifestVersion": 2,
   "requiresCustomScript": false,
   "supportedHosts": [
-    "SharePointWebPart",
-    "TeamsPersonalApp",
-    "TeamsTab"
+    "SharePointWebPart"
   ],
   "supportsThemeVariants": true,
   "preconfiguredEntries": [
@@ -26,13 +24,11 @@
       },
       "officeFabricIconFontName": "AnalyticsReport",
       "properties": {
-        "apiBaseUrl": "https://homkeyhakera-lagend-e7cafje6hyhfdyfk.westeurope-01.azurewebsites.net",
         "useMockData": false,
         "pollIntervalMs": 5000,
         "enableDebugLogs": true,
         "sharePointSiteUrl": "",
-        "sharePointFolderServerRelativeUrl": "",
-        "backendResource": "api://026e9069-414c-4df4-8513-bdeb9ff301d2"
+        "sharePointFolderServerRelativeUrl": ""
       }
     }
   ]

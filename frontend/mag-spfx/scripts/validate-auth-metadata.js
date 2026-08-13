@@ -5,83 +5,65 @@ const path = require('path');
 
 const projectRoot = path.resolve(__dirname, '..');
 const readJson = (relativePath) => JSON.parse(fs.readFileSync(path.join(projectRoot, relativePath), 'utf8'));
-const fail = (message) => {
-  throw new Error(`[auth-metadata] ${message}`);
-};
+const readSource = (relativePath) => fs.readFileSync(path.join(projectRoot, relativePath), 'utf8');
+const fail = (message) => { throw new Error(`[auth-metadata] ${message}`); };
 
 const packageJson = readJson('package.json');
 const release = readJson('release-manifest.json');
 const solution = readJson('config/package-solution.json');
 const manifest = readJson('src/webparts/magApp/MagAppWebPart.manifest.json');
-const webPartSource = fs.readFileSync(
-  path.join(projectRoot, 'src/webparts/magApp/MagAppWebPart.ts'),
-  'utf8'
-);
-const tokenServiceSource = fs.readFileSync(
-  path.join(projectRoot, 'src/webparts/magApp/services/TokenService.ts'),
-  'utf8'
-);
+const webPartSource = readSource('src/webparts/magApp/MagAppWebPart.ts');
+const authenticationSource = readSource('src/webparts/magApp/auth/AuthenticationService.ts');
+const authConfigSource = readSource('src/webparts/magApp/auth/authConfig.ts');
 
-if (packageJson.version !== release.packageVersion) {
-  fail(`package version must match release-manifest.json (${release.packageVersion}), received ${packageJson.version}`);
+if (packageJson.version !== '0.1.7' || packageJson.version !== release.packageVersion) {
+  fail(`package version must be 0.1.7 and match release-manifest, received ${packageJson.version}`);
 }
-
+if (packageJson.dependencies?.['@azure/msal-browser'] !== '4.25.1') {
+  fail('@azure/msal-browser must be pinned exactly to 4.25.1');
+}
 if (packageJson.engines?.node !== '>=22.14.0 <23.0.0') {
   fail(`Node engine must be >=22.14.0 <23.0.0, received ${packageJson.engines?.node}`);
 }
-
-if (solution.solution.id !== release.solutionId) {
-  fail(`solution ID must match release-manifest.json (${release.solutionId})`);
+if (solution.solution.id !== release.solutionId || solution.solution.version !== release.solutionVersion) {
+  fail('solution ID and version must match release-manifest.json');
 }
-
-if (solution.solution.version !== release.solutionVersion) {
-  fail(`solution version must match release-manifest.json (${release.solutionVersion}), received ${solution.solution.version}`);
-}
-
 const configuredPackagePath = path.posix.join('sharepoint', solution.paths.zippedPackage);
-if (configuredPackagePath !== release.packagePath) {
-  fail(`package path must match release-manifest.json (${release.packagePath}), received ${configuredPackagePath}`);
-}
+if (configuredPackagePath !== release.packagePath) fail('package path must match release-manifest.json');
+if (manifest.id !== release.componentId) fail('component ID must match release-manifest.json');
 
-if (manifest.id !== release.componentId) {
-  fail(`component ID must match release-manifest.json (${release.componentId})`);
+if ('webApiPermissionRequests' in solution.solution) {
+  fail('webApiPermissionRequests must be absent for the independent MSAL client');
 }
-
-const permissions = solution.solution.webApiPermissionRequests || [];
-if (
-  permissions.length !== 1 ||
-  permissions[0].resource !== 'MAG-Agent-Backend-API' ||
-  permissions[0].scope !== 'user_impersonation'
-) {
-  fail('webApiPermissionRequests must contain only MAG-Agent-Backend-API / user_impersonation');
-}
-
-if (/^[0-9a-f-]{36}$/i.test(permissions[0].resource) || /^api:\/\//i.test(permissions[0].resource)) {
-  fail('webApiPermissionRequests.resource must be the service-principal display name, not a GUID or URI');
+if (JSON.stringify(manifest.supportedHosts) !== JSON.stringify(['SharePointWebPart'])) {
+  fail('supportedHosts must contain SharePointWebPart only');
 }
 
 const properties = manifest.preconfiguredEntries?.[0]?.properties || {};
-if (properties.backendResource !== 'api://026e9069-414c-4df4-8513-bdeb9ff301d2') {
-  fail('manifest backendResource must be the canonical backend App ID URI');
+for (const field of ['backendResource', 'backendClientId', 'backendAppIdUri', 'apiBaseUrl']) {
+  if (field in properties) fail(`${field} must not be persisted in manifest properties`);
+  const propertyPanePattern = new RegExp(`PropertyPaneTextField\\(['"]${field}['"]`);
+  if (propertyPanePattern.test(webPartSource)) fail(`${field} must not appear in the Property Pane`);
 }
 
-if ('backendClientId' in properties || 'backendAppIdUri' in properties) {
-  fail('deprecated backend fields must not appear in preconfigured manifest properties');
+const sourceTree = `${webPartSource}\n${authenticationSource}\n${authConfigSource}`;
+if (/AadTokenProvider|aadTokenProviderFactory/.test(sourceTree)) {
+  fail('SPFx AadTokenProvider must not participate in authentication');
 }
-
-for (const legacyField of ['backendClientId', 'backendAppIdUri']) {
-  const propertyPanePattern = new RegExp(`PropertyPaneTextField\\(['\"]${legacyField}['\"]`);
-  if (propertyPanePattern.test(webPartSource)) {
-    fail(`${legacyField} must not appear in the Property Pane`);
-  }
+for (const key of [
+  'MAG_ENTRA_TENANT_ID',
+  'MAG_ENTRA_CLIENT_ID',
+  'MAG_ENTRA_BACKEND_SCOPE',
+  'MAG_ENTRA_REDIRECT_URI',
+  'MAG_ENTRA_AUTHORITY'
+]) {
+  if (!authConfigSource.includes(`process.env.${key}`)) fail(`auth config must read ${key}`);
 }
-
-if (tokenServiceSource.includes('DEFAULT_BACKEND_CLIENT_ID')) {
-  fail('TokenService must not contain a hardcoded backend client-ID fallback');
-}
-
-if (/SPFXApp_(?:Client_ID|ID_URI)/.test(`${webPartSource}\n${tokenServiceSource}`)) {
-  fail('frontend App Registration values must not participate in SPFx token acquisition');
+if (!authenticationSource.includes('new PublicClientApplication') ||
+    !authenticationSource.includes('acquireTokenSilent') ||
+    !authenticationSource.includes('loginPopup') ||
+    !authenticationSource.includes('ssoSilent')) {
+  fail('MSAL authentication service is incomplete');
 }
 
 console.log('[auth-metadata] SPFx authentication metadata is valid.');

@@ -15,17 +15,11 @@ import { MagAppConfig } from './domain/types';
 import { findMagAppBundleAsset } from './domain/runtimeFingerprint';
 
 export interface IMagAppWebPartProps {
-  apiBaseUrl: string;
   useMockData: boolean;
   pollIntervalMs: number;
   enableDebugLogs: boolean;
   sharePointSiteUrl: string;
   sharePointFolderServerRelativeUrl: string;
-  backendResource: string;
-  /** @deprecated Read temporarily so existing SharePoint pages keep working. */
-  backendClientId?: string;
-  /** @deprecated Read temporarily so existing SharePoint pages keep working. */
-  backendAppIdUri?: string;
 }
 
 export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartProps> {
@@ -44,17 +38,12 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
   }
 
   public render(): void {
-    let isLocalDocker = false;
     let envApiTarget: string | undefined = undefined;
     let envUseMockData: string | undefined = undefined;
     let envPollIntervalMs: string | undefined = undefined;
 
     try {
-      isLocalDocker = process.env.VITE_USE_LOCAL_DOCKER === 'true';
-    } catch (e) { /* process is not defined */ }
-
-    try {
-      envApiTarget = process.env.VITE_AZURE_API_TARGET || process.env.VITE_API_TARGET;
+      envApiTarget = process.env.MAG_API_BASE_URL || process.env.VITE_AZURE_API_TARGET || process.env.VITE_API_TARGET;
     } catch (e) { /* process is not defined */ }
 
     try {
@@ -65,16 +54,7 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
       envPollIntervalMs = process.env.VITE_POLL_INTERVAL_MS;
     } catch (e) { /* process is not defined */ }
 
-    let apiBaseUrl = this.properties.apiBaseUrl || '';
-    if (!apiBaseUrl) {
-      if (isLocalDocker) {
-        apiBaseUrl = process.env.VITE_API_TARGET || 'http://localhost:7071';
-      } else if (envApiTarget) {
-        apiBaseUrl = envApiTarget;
-      } else {
-        apiBaseUrl = 'https://homkeyhakera-lagend-e7cafje6hyhfdyfk.westeurope-01.azurewebsites.net';
-      }
-    }
+    const apiBaseUrl = envApiTarget || '';
 
     let useMockData = this.properties.useMockData === true;
     let pollIntervalMs = this.properties.pollIntervalMs || 3000;
@@ -90,7 +70,7 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
       }
     }
 
-    const currentWebUrl = this.context.pageContext?.web?.absoluteUrl || 'https://tikshuv.sharepoint.com/sites/MAG_Agent';
+    const currentWebUrl = this.context.pageContext?.web?.absoluteUrl || '';
     const currentWebRelativeUrl = this.context.pageContext?.web?.serverRelativeUrl || '/sites/MAG_Agent';
     const cleanWebRelativeUrl = currentWebRelativeUrl.endsWith('/') ? currentWebRelativeUrl.slice(0, -1) : currentWebRelativeUrl;
 
@@ -102,12 +82,9 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
       sharePointSiteUrl: this.properties.sharePointSiteUrl || currentWebUrl,
       sharePointFolderServerRelativeUrl:
         this.properties.sharePointFolderServerRelativeUrl || `${cleanWebRelativeUrl}/Shared Documents`,
-      backendResource:
-        this.properties.backendResource?.trim() ||
-        this.properties.backendAppIdUri?.trim() ||
-        this.properties.backendClientId?.trim() ||
-        '',
-      aadTokenProviderFactory: this.context.aadTokenProviderFactory
+      sharePointUserLoginHint: (
+        this.context.pageContext?.user?.email || this.context.pageContext?.user?.loginName
+      )?.split('|').pop()
     };
 
     const element = React.createElement(MagApp, { config, spHttpClient: this.context.spHttpClient });
@@ -133,14 +110,6 @@ export default class MagAppWebPart extends BaseClientSideWebPart<IMagAppWebPartP
             {
               groupName: 'חיבור למערכת',
               groupFields: [
-                PropertyPaneTextField('apiBaseUrl', {
-                  label: strings.ApiBaseUrlFieldLabel,
-                  placeholder: 'https://<function-app>.azurewebsites.net'
-                }),
-                PropertyPaneTextField('backendResource', {
-                  label: 'Backend App ID URI',
-                  placeholder: 'api://<backend-client-id>'
-                }),
                 PropertyPaneToggle('useMockData', {
                   label: strings.UseMockDataFieldLabel,
                   onText: 'נתוני דמה',

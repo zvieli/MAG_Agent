@@ -1,10 +1,10 @@
 {
-  "packageVersion": "0.1.6",
+  "packageVersion": "0.1.7",
   "solutionId": "b071a1d2-aa81-47ac-9849-768c2e54f213",
-  "solutionVersion": "0.1.6.0",
+  "solutionVersion": "0.1.7.0",
   "componentId": "59916776-40f5-4f23-9549-aa3ff16f4c87",
   "packagePath": "sharepoint/solution/mag-spfx.sppkg",
-  "packageSha256": "e460eaffd60a2096f1aa468f8f59c8dd5b4b8b28d789a630714123a2dbb37a90",
-  "bundle": "ClientSideAssets/mag-app-web-part_d8a834c6148c1daa0e78.js",
+  "packageSha256": "dd3efd13a9b7760539b2b4f5a756359d51211a08df12d8fae77bd16635ed7d9e",
+  "bundle": "ClientSideAssets/mag-app-web-part_269db42b0362ae748587.js",
   "builtWithNode": "22.23.1"
 }

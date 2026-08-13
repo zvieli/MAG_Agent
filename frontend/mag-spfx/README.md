@@ -41,11 +41,30 @@ https://<tenant>.sharepoint.com/_layouts/15/workbench.aspx?debugManifestsFile=ht
 
 ## Web Part Configuration Properties
 
-- `apiBaseUrl`: Function App base URL (e.g. `http://localhost:7071` or `https://<app>.azurewebsites.net`).
-- `backendResource`: Canonical backend App ID URI (`api://026e9069-414c-4df4-8513-bdeb9ff301d2`). Saved legacy `backendClientId` and `backendAppIdUri` values are accepted only for migration and normalized to this URI.
 - `useMockData`: Toggles mock service providers for local UI testing without a live backend.
 - `pollIntervalMs`: Durable Functions orchestration polling interval in milliseconds.
 - `enableDebugLogs`: Enables verbose request logging in the browser developer console.
+
+Backend and Entra values are deployment configuration, not Web Part properties and
+not source-code defaults. Supply these public values to the build environment (or
+the existing untracked `frontend/app/.env.local` input):
+
+```bash
+cp ../app/.env.example ../app/.env.local
+```
+
+```text
+MAG_API_BASE_URL=https://<function-app>.azurewebsites.net
+MAG_ENTRA_TENANT_ID=78820852-55fa-450b-908d-45c0d911e76b
+MAG_ENTRA_CLIENT_ID=14b4e437-8b19-4950-9150-a46ab8d626b8
+MAG_ENTRA_AUTHORITY=https://login.microsoftonline.com/78820852-55fa-450b-908d-45c0d911e76b
+MAG_ENTRA_BACKEND_SCOPE=api://026e9069-414c-4df4-8513-bdeb9ff301d2/user_impersonation
+MAG_ENTRA_REDIRECT_URI=https://tikshuv.sharepoint.com/_forms/spfxsinglesignon.aspx
+```
+
+The app fails closed if an authentication value is missing or invalid. These are
+identifiers, not secrets. Never expose a client secret, Function key, token, or
+sensitive payload through client environment variables.
 
 ## Client-Side Caching & HTTP API Contracts
 
@@ -64,9 +83,18 @@ x-mag-trace-id: <client-generated-trace-id>
 
 ## Production Entra Authentication
 
-The SPFx token provider receives the backend's exact App ID URI through `backendResource`; the delegated scope and `/.default` are not appended to that resource. A shared authentication boundary owns the actual `fetch` and XHR transports for pipeline, graph, report, timeline, and chat calls. For every non-loopback API URL, token acquisition and a final Bearer-header assertion complete before the native network primitive is invoked; token acquisition failures and backend 401/403 responses surface as sanitized security errors in the console and UI. Exact HTTP(S) `localhost`, `127.0.0.1`, and `::1` URLs remain tokenless for local development, where the backend must explicitly set `REQUIRE_ENTRA_AUTH=false`.
+The Web Part uses one `@azure/msal-browser@4.25.1`
+`PublicClientApplication` with Authorization Code + PKCE. Startup selects only a
+cached account from the configured tenant, or attempts `ssoSilent` using the
+SharePoint user's address. If interaction is required, a Hebrew Auth Gate blocks the
+application until its button invokes `loginPopup`. Backend calls never invoke a
+popup: they use only `acquireTokenSilent` and are blocked before `fetch` or XHR when
+a token is absent.
 
-SPFx uses the tenant's Microsoft-managed SharePoint Online Client Extensibility Web Application Principal as its OAuth client. A separately provisioned frontend App Registration is not used by `AadTokenProvider`, is not passed to token acquisition, and must not replace the SharePoint principal in Easy Auth's allowed client applications.
+A shared authentication boundary owns all pipeline, graph, report, timeline, and
+chat transport. It removes caller-supplied Authorization and supplies its own Bearer
+token. Exact HTTP(S) `localhost`, `127.0.0.1`, and `::1` URLs remain tokenless for
+local development. There is no fallback to SharePoint Client Extensibility.
 
 Configure the Function App with the authentication settings already used by the repository's `.env`:
 
@@ -77,14 +105,20 @@ AZURE_CLIENT_ID=026e9069-414c-4df4-8513-bdeb9ff301d2
 AZURE_Application_ID_URI=api://026e9069-414c-4df4-8513-bdeb9ff301d2
 ```
 
-The backend requires the fixed delegated scope `user_impersonation`; it is separate from the Application ID URI. Production must keep `REQUIRE_ENTRA_AUTH=true`; omitting the setting also fails closed. The preconfigured Web Part manifest supplies `backendResource`; the TypeScript token service has no hardcoded fallback.
+The backend requires delegated `user_impersonation`. The SPA registration must have
+that permission with admin consent. The SPFx package has no
+`webApiPermissionRequests`; SharePoint Admin Center API access does not participate.
 
-The package requests `user_impersonation` from the backend resource display name `MAG-Agent-Backend-API`. Before packaging, DevOps must confirm that this remains the exact service-principal display name. Deploy the package and approve its pending permission in SharePoint Admin Center API access; never replace `resource` with a client or object GUID.
+Easy Auth owns issuer, tenant, audience, signature, and calling-client validation.
+Keep the independent SPA Client ID in Allowed Client Applications and do not add the
+SharePoint principal as fallback. The Function reads `X-MS-CLIENT-PRINCIPAL` and
+enforces `user_impersonation`. See the [deployment runbook](../../EASY_AUTH_DEPLOYMENT.md).
 
-Easy Auth owns issuer, tenant, audience, signature, and calling-client validation. The Function reads its trusted `X-MS-CLIENT-PRINCIPAL` header and enforces `user_impersonation`. Configure Easy Auth to require authentication with a `401` response, exclude only `/api/ping`, and allowlist the tenant's SharePoint Online Client Extensibility application. See the repository [deployment runbook](../../EASY_AUTH_DEPLOYMENT.md).
+MSAL is pinned to v4 because the supplied SharePoint SSO redirect page does not host
+the redirect bridge required by MSAL v5. A v5 upgrade requires a dedicated callback.
 
 For local acceptance, verify that `temp/build/manifests.js` reports component version
-`0.1.6`, that `dist/mag-app-web-part.js` loads from `https://localhost:4321`, and
+`0.1.7`, that `dist/mag-app-web-part.js` loads from `https://localhost:4321`, and
 that the console runtime fingerprint reports both values. For live acceptance, use
 the deployed SharePoint package and verify the fingerprint reports component version
 and bundle recorded in `release-manifest.json`. Verify that `pipeline-preflight`
@@ -92,6 +126,10 @@ contains a Bearer token and returns 200, then exercise upload, orchestration pol
 graph/report loading, and chat. Force token acquisition to fail once and confirm that
 no backend request is created. A manual request without a token must return Easy Auth
 `401`; a valid token without the delegated scope must return application JSON `403`.
+In normal and private SharePoint windows, verify the authorize request uses the
+configured client and scope and the backend sees that client as `azp` with
+`scp=user_impersonation`. Stop deployment on `AADSTS50011` or when the popup does not
+return; Azure must provide a compatible callback before any MSAL v5 migration.
 
 ## Quality & Type Checks
 

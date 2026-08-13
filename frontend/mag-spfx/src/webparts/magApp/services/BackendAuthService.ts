@@ -1,9 +1,9 @@
 import { DebugLogger } from '../domain/debugLogger';
 import {
   EntraAuthenticationError,
-  TokenService,
+  IAuthenticationService,
   isEntraAuthenticationError
-} from './TokenService';
+} from '../auth/AuthenticationService';
 import { throwIfBackendAuthenticationRejected } from './http';
 
 export interface BackendRequestContext {
@@ -56,16 +56,16 @@ export const isLoopbackApiUrl = (apiBaseUrl: string): boolean => {
 
 export class BackendAuthService {
   public readonly mode: BackendAuthMode;
-  private readonly tokenService: TokenService;
+  private readonly authenticationService: IAuthenticationService;
   private readonly logger?: DebugLogger;
 
   public constructor(
     apiBaseUrl: string,
-    tokenService: TokenService,
+    authenticationService: IAuthenticationService,
     logger?: DebugLogger
   ) {
     this.mode = isLoopbackApiUrl(apiBaseUrl) ? 'loopback' : 'entra';
-    this.tokenService = tokenService;
+    this.authenticationService = authenticationService;
     this.logger = logger;
   }
 
@@ -119,12 +119,12 @@ export class BackendAuthService {
     const mode = this.requestMode(context.url);
 
     if (mode === 'entra') {
-      if (!this.tokenService) {
-        throw this.authenticationFailure(undefined, context, 'missing-token-service');
+      if (!this.authenticationService) {
+        throw this.authenticationFailure(undefined, context, 'missing-authentication-service');
       }
 
       try {
-        const token = await this.tokenService.getAccessToken();
+        const token = await this.authenticationService.getAccessToken();
         if (!token || !token.trim()) {
           throw new EntraAuthenticationError({ reason: 'empty-token' });
         }

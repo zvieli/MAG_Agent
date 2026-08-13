@@ -2,7 +2,7 @@ import { CommunitySummariesResult, ProtocolCompletenessResult, ReportResult } fr
 import { browserCache } from '../domain/browserCache';
 import { IReportService } from './IAppServices';
 import { BackendAuthService, requireBackendAuthService } from './BackendAuthService';
-import { isEntraAuthenticationError } from './TokenService';
+import { isEntraAuthenticationError } from '../auth/AuthenticationService';
 import { apiUrl, readJson } from './http';
 
 const reportTtlMs = 30 * 60 * 1000;

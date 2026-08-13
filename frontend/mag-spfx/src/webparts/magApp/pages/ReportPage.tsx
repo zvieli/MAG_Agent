@@ -5,7 +5,7 @@ import styles from '../components/MagApp.module.scss';
 import { CommunitySummariesResult, ProtocolCompletenessItem, ProtocolCompletenessResult, ReportResult } from '../domain/types';
 import { IReportService } from '../services/IAppServices';
 import { requestErrorText, sourceLabel } from '../domain/localization';
-import { isEntraAuthenticationError } from '../services/TokenService';
+import { isEntraAuthenticationError } from '../auth/AuthenticationService';
 
 
 export interface ReportPageProps {

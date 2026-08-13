@@ -1,6 +1,6 @@
 {
   "name": "mag-spfx",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "private": true,
   "engines": {
     "node": ">=22.14.0 <23.0.0"
@@ -17,6 +17,7 @@
     "trust-cert": "gulp trust-dev-cert"
   },
   "dependencies": {
+    "@azure/msal-browser": "4.25.1",
     "@fluentui/react": "^8.122.11",
     "@microsoft/sp-core-library": "1.23.0",
     "@microsoft/sp-lodash-subset": "1.23.0",

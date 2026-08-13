@@ -41,14 +41,19 @@ build.configureWebpack.mergeConfig({
       'VITE_AZURE_API_TARGET',
       'VITE_API_TARGET',
       'VITE_USE_MOCK_DATA',
-      'VITE_POLL_INTERVAL_MS'
+      'VITE_POLL_INTERVAL_MS',
+      'MAG_API_BASE_URL',
+      'MAG_ENTRA_TENANT_ID',
+      'MAG_ENTRA_CLIENT_ID',
+      'MAG_ENTRA_BACKEND_SCOPE',
+      'MAG_ENTRA_REDIRECT_URI',
+      'MAG_ENTRA_AUTHORITY'
     ]);
     const definitions = {};
-    for (const key in env) {
-      if (Object.prototype.hasOwnProperty.call(env, key) && publicClientEnvironmentKeys.has(key)) {
-        definitions[`process.env.${key}`] = JSON.stringify(env[key]);
-        console.log(`[gulpfile.js] Defining public client environment variable ${key}`);
-      }
+    for (const key of publicClientEnvironmentKeys) {
+      const value = process.env[key] || env[key] || '';
+      definitions[`process.env.${key}`] = JSON.stringify(value);
+      if (value) console.log(`[gulpfile.js] Defining public client environment variable ${key}`);
     }
 
     generatedConfiguration.plugins.push(new webpack.DefinePlugin(definitions));

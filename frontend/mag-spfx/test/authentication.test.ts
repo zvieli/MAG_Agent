@@ -8,10 +8,12 @@ import { ReportService } from '../src/webparts/magApp/services/ReportService';
 import {
   ENTRA_AUTHENTICATION_FAILED,
   EntraAuthenticationError,
-  TokenService,
+  IAuthenticationService,
+  MsalAuthenticationService,
+  getAuthenticationService,
   isEntraAuthenticationError,
-  normalizeBackendResource
-} from '../src/webparts/magApp/services/TokenService';
+} from '../src/webparts/magApp/auth/AuthenticationService';
+import { AuthRuntimeConfiguration, loadAuthConfiguration } from '../src/webparts/magApp/auth/authConfig';
 
 const logger = {
   enabled: true,
@@ -22,12 +24,38 @@ const logger = {
 };
 
 const cloudUrl = 'https://function.example';
-const backendClientId = '026e9069-414c-4df4-8513-bdeb9ff301d2';
-const backendResource = `api://${backendClientId}`;
+const tenantId = '11111111-2222-4333-8444-555555555555';
+const backendScope = 'api://aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee/user_impersonation';
+const redirectUri = 'https://sharepoint.example/_forms/spfxsinglesignon.aspx';
+const authConfig = {
+  tenantId,
+  clientId: '99999999-8888-4777-8666-555555555555',
+  backendScope,
+  redirectUri,
+  authority: `https://login.microsoftonline.com/${tenantId}`,
+  msal: {}
+} as AuthRuntimeConfiguration;
+const account = { tenantId, username: 'user@example.com', homeAccountId: 'home-1' } as any;
 
-const tokenServiceWith = (getAccessToken: jest.Mock): TokenService => ({
+const authenticationWith = (getAccessToken: jest.Mock): IAuthenticationService => ({
+  state: { status: 'ready' },
+  initialize: jest.fn().mockResolvedValue(undefined),
+  signIn: jest.fn().mockResolvedValue(undefined),
+  subscribe: jest.fn(() => jest.fn()),
   getAccessToken
-} as unknown as TokenService);
+});
+
+const msalClient = (overrides: Record<string, unknown> = {}): any => ({
+  initialize: jest.fn().mockResolvedValue(undefined),
+  handleRedirectPromise: jest.fn().mockResolvedValue(null),
+  getAllAccounts: jest.fn(() => []),
+  getActiveAccount: jest.fn(() => null),
+  setActiveAccount: jest.fn(),
+  ssoSilent: jest.fn(),
+  loginPopup: jest.fn(),
+  acquireTokenSilent: jest.fn(),
+  ...overrides
+});
 
 const duplicateResponse = (): Response => ({
   ok: true,
@@ -68,47 +96,152 @@ describe('SPFx Entra authentication', () => {
     ])).toBeUndefined();
   });
 
-  it('passes the exact backend App ID URI to getToken', async () => {
-    const getToken = jest.fn().mockResolvedValue('access-token');
-    const factory = {
-      getTokenProvider: jest.fn().mockResolvedValue({ getToken })
+  it('selects a cached account from the configured tenant without creating silent SSO traffic', async () => {
+    const client = msalClient({ getAllAccounts: jest.fn(() => [account]) });
+    const service = new MsalAuthenticationService(client, authConfig, account.username, logger);
+
+    await service.initialize();
+
+    expect(service.state.status).toBe('ready');
+    expect(client.setActiveAccount).toHaveBeenCalledWith(account);
+    expect(client.ssoSilent).not.toHaveBeenCalled();
+  });
+
+  it('uses the SharePoint login hint for silent SSO when no tenant account is cached', async () => {
+    const client = msalClient({ ssoSilent: jest.fn().mockResolvedValue({ account }) });
+    const service = new MsalAuthenticationService(client, authConfig, account.username, logger);
+
+    await service.initialize();
+
+    expect(client.ssoSilent).toHaveBeenCalledWith(expect.objectContaining({
+      loginHint: account.username,
+      scopes: [backendScope],
+      redirectUri
+    }));
+    expect(service.state.status).toBe('ready');
+  });
+
+  it('publishes interaction-required when silent SSO requires user interaction', async () => {
+    const client = msalClient({
+      ssoSilent: jest.fn().mockRejectedValue({ errorCode: 'login_required' })
+    });
+    const service = new MsalAuthenticationService(client, authConfig, account.username, logger);
+
+    await service.initialize();
+
+    expect(service.state).toMatchObject({ status: 'interaction-required', reason: 'interaction-required' });
+  });
+
+  it('deduplicates concurrent initialization on a single MSAL instance', async () => {
+    const client = msalClient({ getAllAccounts: jest.fn(() => [account]) });
+    const service = new MsalAuthenticationService(client, authConfig, account.username, logger);
+
+    await Promise.all([service.initialize(), service.initialize(), service.initialize()]);
+
+    expect(client.initialize).toHaveBeenCalledTimes(1);
+    expect(client.handleRedirectPromise).toHaveBeenCalledTimes(1);
+  });
+
+  it('returns one shared authentication service for concurrent Web Part consumers', () => {
+    const environment = {
+      MAG_ENTRA_TENANT_ID: authConfig.tenantId,
+      MAG_ENTRA_CLIENT_ID: authConfig.clientId,
+      MAG_ENTRA_AUTHORITY: authConfig.authority,
+      MAG_ENTRA_BACKEND_SCOPE: authConfig.backendScope,
+      MAG_ENTRA_REDIRECT_URI: authConfig.redirectUri
     };
-    const service = new TokenService(factory as any, backendResource, logger);
+    Object.assign(process.env, environment);
+    const clientFactory = jest.fn(() => msalClient());
+
+    expect(loadAuthConfiguration()).toMatchObject({
+      tenantId: authConfig.tenantId,
+      clientId: authConfig.clientId,
+      backendScope: authConfig.backendScope,
+      redirectUri: authConfig.redirectUri
+    });
+    expect(getAuthenticationService(account.username, logger, clientFactory)).toBe(
+      getAuthenticationService('second@example.com', logger, clientFactory)
+    );
+    expect(clientFactory).toHaveBeenCalledTimes(1);
+  });
+
+  it('moves to error when silent SSO returns an account from another tenant', async () => {
+    const foreignAccount = { ...account, tenantId: '22222222-3333-4444-8555-666666666666' };
+    const client = msalClient({ ssoSilent: jest.fn().mockResolvedValue({ account: foreignAccount }) });
+    const service = new MsalAuthenticationService(client, authConfig, account.username, logger);
+
+    await service.initialize();
+
+    expect(service.state).toMatchObject({ status: 'error', reason: 'invalid-configuration' });
+  });
+
+  it('completes popup sign-in and makes the returned account active', async () => {
+    const client = msalClient({ loginPopup: jest.fn().mockResolvedValue({ account }) });
+    const service = new MsalAuthenticationService(client, authConfig, account.username, logger);
+
+    await service.signIn();
+
+    expect(client.loginPopup).toHaveBeenCalledWith(expect.objectContaining({ scopes: [backendScope], redirectUri }));
+    expect(client.setActiveAccount).toHaveBeenCalledWith(account);
+    expect(service.state.status).toBe('ready');
+  });
+
+  it.each([
+    ['user_cancelled', 'popup-cancelled', false],
+    ['popup_window_error', 'popup-blocked', false],
+    ['popup_window_error', 'popup-blocked', true]
+  ])('keeps popup error %s retryable and sanitized', async (errorCode, reason, synchronous) => {
+    const loginPopup = synchronous
+      ? jest.fn(() => { throw { errorCode }; })
+      : jest.fn().mockRejectedValue({ errorCode });
+    const client = msalClient({ loginPopup });
+    const service = new MsalAuthenticationService(client, authConfig, account.username, logger);
+
+    await expect(service.signIn()).rejects.toMatchObject({ reason });
+    expect(service.state).toMatchObject({ status: 'interaction-required', reason });
+  });
+
+  it('uses only acquireTokenSilent with the configured delegated scope', async () => {
+    const client = msalClient({
+      getAllAccounts: jest.fn(() => [account]),
+      getActiveAccount: jest.fn(() => account),
+      acquireTokenSilent: jest.fn().mockResolvedValue({ accessToken: 'access-token' })
+    });
+    const service = new MsalAuthenticationService(client, authConfig, account.username, logger);
 
     await expect(service.getAccessToken()).resolves.toBe('access-token');
-    expect(getToken).toHaveBeenCalledTimes(1);
-    expect(getToken).toHaveBeenCalledWith(backendResource);
+    expect(client.acquireTokenSilent).toHaveBeenCalledWith(expect.objectContaining({
+      account,
+      scopes: [backendScope],
+      redirectUri
+    }));
+    expect(client.loginPopup).not.toHaveBeenCalled();
   });
 
   it.each([
-    [backendClientId, backendResource],
-    [backendResource, backendResource],
-    [`${backendResource}/user_impersonation`, backendResource],
-    [`${backendResource}/.default`, backendResource],
-    [`${backendResource}/user_impersonation/.default`, backendResource],
-    [`${backendResource}/`, backendResource]
-  ])('normalizes legacy backend value %s', (configured, expected) => {
-    expect(normalizeBackendResource(configured)).toBe(expected);
-  });
-
-  it.each([
-    ['api://not-a-client-id/user_impersonation', 'invalid-backend-resource'],
-    ['https://function.example', 'invalid-backend-resource'],
-    ['', 'missing-backend-resource']
-  ])('rejects invalid backend resource %s before asking SPFx for a provider', async (resource, reason) => {
-    const factory = { getTokenProvider: jest.fn() };
-    const service = new TokenService(factory as any, resource, logger);
-
-    await expect(service.getAccessToken()).rejects.toMatchObject({
-      code: ENTRA_AUTHENTICATION_FAILED,
-      reason
+    ['empty', 'empty-token'],
+    ['entra', 'silent-acquisition-failed'],
+    ['interaction', 'interaction-required']
+  ])('classifies silent token failure %s without falling back to interaction', async (failure, reason) => {
+    const acquireTokenSilent = failure === 'empty'
+      ? jest.fn().mockResolvedValue({ accessToken: '   ' })
+      : jest.fn().mockRejectedValue({
+        errorCode: failure === 'interaction' ? 'consent_required' : 'temporarily_unavailable'
+      });
+    const client = msalClient({
+      getAllAccounts: jest.fn(() => [account]),
+      getActiveAccount: jest.fn(() => account),
+      acquireTokenSilent
     });
-    expect(factory.getTokenProvider).not.toHaveBeenCalled();
+    const service = new MsalAuthenticationService(client, authConfig, account.username, logger);
+
+    await expect(service.getAccessToken()).rejects.toMatchObject({ reason });
+    expect(client.loginPopup).not.toHaveBeenCalled();
   });
 
   it('sends cloud preflight only after adding the Bearer token', async () => {
-    const tokenService = tokenServiceWith(jest.fn().mockResolvedValue('access-token'));
-    const backendAuth = new BackendAuthService(cloudUrl, tokenService, logger);
+    const authentication = authenticationWith(jest.fn().mockResolvedValue('access-token'));
+    const backendAuth = new BackendAuthService(cloudUrl, authentication, logger);
     const service = new PipelineService(cloudUrl, backendAuth, logger);
     const fetchSpy = jest.fn().mockResolvedValue(duplicateResponse());
     window.fetch = fetchSpy;
@@ -129,7 +262,7 @@ describe('SPFx Entra authentication', () => {
   ])('maps fetch status %s to a sanitized Entra authentication error', async (status, reason) => {
     const backendAuth = new BackendAuthService(
       cloudUrl,
-      tokenServiceWith(jest.fn().mockResolvedValue('access-token')),
+      authenticationWith(jest.fn().mockResolvedValue('access-token')),
       logger
     );
     const responseText = jest.fn();
@@ -166,7 +299,7 @@ describe('SPFx Entra authentication', () => {
   it('maps an XHR 403 to the same fail-closed Entra error without exposing its body', async () => {
     const backendAuth = new BackendAuthService(
       cloudUrl,
-      tokenServiceWith(jest.fn().mockResolvedValue('access-token')),
+      authenticationWith(jest.fn().mockResolvedValue('access-token')),
       logger
     );
     const service = new PipelineService(cloudUrl, backendAuth, logger);
@@ -209,7 +342,7 @@ describe('SPFx Entra authentication', () => {
     ['empty token', jest.fn().mockResolvedValue(undefined)]
   ])('blocks preflight with zero network calls on %s', async (_label, getAccessToken) => {
     const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
-    const backendAuth = new BackendAuthService(cloudUrl, tokenServiceWith(getAccessToken), logger);
+    const backendAuth = new BackendAuthService(cloudUrl, authenticationWith(getAccessToken), logger);
     const service = new PipelineService(cloudUrl, backendAuth, logger);
     const fetchSpy = jest.fn();
     window.fetch = fetchSpy;
@@ -239,7 +372,7 @@ describe('SPFx Entra authentication', () => {
     const authError = new EntraAuthenticationError({ reason: 'token-acquisition-failed' });
     const backendAuth = new BackendAuthService(
       cloudUrl,
-      tokenServiceWith(jest.fn().mockRejectedValue(authError)),
+      authenticationWith(jest.fn().mockRejectedValue(authError)),
       logger
     );
     const service = new PipelineService(cloudUrl, backendAuth, logger);
@@ -282,7 +415,7 @@ describe('SPFx Entra authentication', () => {
     'http://[::1]:7071'
   ])('allows tokenless local development for loopback URL %s', async (url) => {
     const getAccessToken = jest.fn().mockRejectedValue(new Error('must not be called'));
-    const backendAuth = new BackendAuthService(url, tokenServiceWith(getAccessToken), logger);
+    const backendAuth = new BackendAuthService(url, authenticationWith(getAccessToken), logger);
     const fetchSpy = jest.fn().mockResolvedValue({ ok: true });
     window.fetch = fetchSpy;
 
@@ -302,7 +435,7 @@ describe('SPFx Entra authentication', () => {
     const getAccessToken = jest.fn().mockResolvedValue('external-token');
     const backendAuth = new BackendAuthService(
       'http://localhost:7071',
-      tokenServiceWith(getAccessToken),
+      authenticationWith(getAccessToken),
       logger
     );
     const fetchSpy = jest.fn().mockResolvedValue({ ok: true });
@@ -325,8 +458,8 @@ describe('SPFx Entra authentication', () => {
     'https://function.azurewebsites.net',
     'file://localhost/tmp/api'
   ])('treats %s as a cloud-protected URL', (url) => {
-    const tokenService = tokenServiceWith(jest.fn());
-    expect(new BackendAuthService(url, tokenService, logger).mode).toBe('entra');
+    const authentication = authenticationWith(jest.fn());
+    expect(new BackendAuthService(url, authentication, logger).mode).toBe('entra');
     expect(isLoopbackApiUrl(url)).toBe(false);
   });
 
@@ -335,7 +468,7 @@ describe('SPFx Entra authentication', () => {
     const authError = new EntraAuthenticationError({ reason: 'token-acquisition-failed' });
     const backendAuth = new BackendAuthService(
       cloudUrl,
-      tokenServiceWith(jest.fn().mockRejectedValue(authError)),
+      authenticationWith(jest.fn().mockRejectedValue(authError)),
       logger
     );
     const fetchSpy = jest.fn();
@@ -353,7 +486,7 @@ describe('SPFx Entra authentication', () => {
     const authError = new EntraAuthenticationError({ reason: 'token-acquisition-failed' });
     const backendAuth = new BackendAuthService(
       cloudUrl,
-      tokenServiceWith(jest.fn().mockRejectedValue(authError)),
+      authenticationWith(jest.fn().mockRejectedValue(authError)),
       logger
     );
     const originalXhr = window.XMLHttpRequest;
@@ -374,7 +507,7 @@ describe('SPFx Entra authentication', () => {
   it('opens cloud XHR only after applying Entra and operational headers', async () => {
     const backendAuth = new BackendAuthService(
       cloudUrl,
-      tokenServiceWith(jest.fn().mockResolvedValue('xhr-access-token')),
+      authenticationWith(jest.fn().mockResolvedValue('xhr-access-token')),
       logger
     );
     const originalXhr = window.XMLHttpRequest;
@@ -402,12 +535,15 @@ describe('SPFx Entra authentication', () => {
 
   it('logs and displays only sanitized authentication diagnostics', async () => {
     const correlationId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
-    const getToken = jest.fn().mockRejectedValue(
-      new Error(`AADSTS65001: secret-token-value correlation_id: ${correlationId}`)
-    );
-    const factory = { getTokenProvider: jest.fn().mockResolvedValue({ getToken }) };
-    const tokenService = new TokenService(factory as any, backendResource, logger);
-    const backendAuth = new BackendAuthService(cloudUrl, tokenService, logger);
+    const client = msalClient({
+      getAllAccounts: jest.fn(() => [account]),
+      getActiveAccount: jest.fn(() => account),
+      acquireTokenSilent: jest.fn().mockRejectedValue(
+        new Error(`AADSTS65001: secret-token-value correlation_id: ${correlationId}`)
+      )
+    });
+    const authentication = new MsalAuthenticationService(client, authConfig, account.username, logger);
+    const backendAuth = new BackendAuthService(cloudUrl, authentication, logger);
     const consoleError = jest.spyOn(console, 'error').mockImplementation(() => undefined);
 
     let caught: unknown;

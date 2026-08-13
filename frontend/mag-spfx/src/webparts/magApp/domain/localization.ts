@@ -1,5 +1,5 @@
 import { RuntimeStatus } from './types';
-import { isEntraAuthenticationError } from '../services/TokenService';
+import { isEntraAuthenticationError } from '../auth/AuthenticationService';
 
 const statusLabels: Record<RuntimeStatus, string> = {
   Pending: 'ממתין',

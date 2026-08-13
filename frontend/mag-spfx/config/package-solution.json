@@ -3,16 +3,10 @@
   "solution": {
     "name": "mag-spfx-client-side-solution",
     "id": "b071a1d2-aa81-47ac-9849-768c2e54f213",
-    "version": "0.1.6.0",
+    "version": "0.1.7.0",
     "includeClientSideAssets": true,
     "skipFeatureDeployment": true,
     "isDomainIsolated": false,
-    "webApiPermissionRequests": [
-      {
-        "resource": "MAG-Agent-Backend-API",
-        "scope": "user_impersonation"
-      }
-    ],
     "features": [
       {
         "title": "mag-spfx Feature",
