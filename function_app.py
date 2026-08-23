@@ -138,8 +138,10 @@ def _pipeline_status_payload(
     current_batch: int,
     last_error: str | None,
     blocked_chunks: int = 0,
+    failed_chunks: int = 0,
     coverage_ratio: float | None = None,
     blocked_page_ranges: List[List[int]] | None = None,
+    failed_page_ranges: List[List[int]] | None = None,
     manifest_path: str | None = None,
     review_required: bool = False,
 ) -> Dict[str, Any]:
@@ -154,8 +156,10 @@ def _pipeline_status_payload(
         "current_batch": current_batch,
         "last_error": last_error,
         "blocked_chunks": blocked_chunks,
+        "failed_chunks": failed_chunks,
         "coverage_ratio": coverage_ratio,
         "blocked_page_ranges": blocked_page_ranges or [],
+        "failed_page_ranges": failed_page_ranges or [],
         "manifest_path": manifest_path,
         "review_required": review_required,
     }
@@ -1501,7 +1505,9 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
             extraction_results.extend(batch_result_payloads)
             completed_chunks = len(extraction_results)
             blocked_chunks = sum(
-                1 for item in extraction_results if item.get("outcome") == "content_blocked"
+                1
+                for item in extraction_results
+                if item.get("outcome") in ("content_blocked", "extraction_failed")
             )
             context.set_custom_status(
                 _pipeline_status_payload(
@@ -1564,8 +1570,10 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
                     current_batch=current_batch,
                     last_error=None,
                     blocked_chunks=merge_result.get("blocked_chunks", blocked_chunks),
+                    failed_chunks=merge_result.get("failed_chunks", 0),
                     coverage_ratio=merge_result.get("coverage_ratio", 0.0),
                     blocked_page_ranges=merge_result.get("blocked_page_ranges", []),
+                    failed_page_ranges=merge_result.get("failed_page_ranges", []),
                     manifest_path=merge_result.get("manifest_path"),
                     review_required=True,
                 )
@@ -1578,7 +1586,9 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
                 "manifest_path": merge_result.get("manifest_path"),
                 "coverage_ratio": merge_result.get("coverage_ratio", 0.0),
                 "blocked_count": merge_result.get("blocked_chunks", blocked_chunks),
+                "failed_count": merge_result.get("failed_chunks", 0),
                 "blocked_page_ranges": merge_result.get("blocked_page_ranges", []),
+                "failed_page_ranges": merge_result.get("failed_page_ranges", []),
                 "review_required": True,
             }
 
@@ -1669,8 +1679,10 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
                 current_batch=current_batch,
                 last_error=None,
                 blocked_chunks=merge_result.get("blocked_chunks", 0),
+                failed_chunks=merge_result.get("failed_chunks", 0),
                 coverage_ratio=merge_result.get("coverage_ratio", 1.0),
                 blocked_page_ranges=merge_result.get("blocked_page_ranges", []),
+                failed_page_ranges=merge_result.get("failed_page_ranges", []),
                 manifest_path=merge_result.get("manifest_path"),
                 review_required=merge_result.get("review_required", False),
             )
@@ -1683,7 +1695,9 @@ def pipeline_orchestrator(context: df.DurableOrchestrationContext):
             "manifest_path": merge_result.get("manifest_path"),
             "coverage_ratio": merge_result.get("coverage_ratio", 1.0),
             "blocked_count": merge_result.get("blocked_chunks", 0),
+            "failed_count": merge_result.get("failed_chunks", 0),
             "blocked_page_ranges": merge_result.get("blocked_page_ranges", []),
+            "failed_page_ranges": merge_result.get("failed_page_ranges", []),
             "review_required": merge_result.get("review_required", False),
         }
     except Exception as exc:

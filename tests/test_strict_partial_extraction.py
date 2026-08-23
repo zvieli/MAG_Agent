@@ -516,3 +516,102 @@ def test_preflight_response_disables_http_caching():
 
     assert response.headers["Cache-Control"] == "no-store, max-age=0"
     assert response.headers["Pragma"] == "no-cache"
+
+
+def test_pipeline_status_payload_includes_failed_chunks():
+    import function_app
+
+    status = function_app._pipeline_status_payload(
+        phase="completed_partial",
+        message="Pipeline completed with excluded source ranges",
+        blob_path="uploads/case.pdf",
+        doc_id="case",
+        trace_id="trace-123",
+        total_chunks=5,
+        completed_chunks=5,
+        current_batch=1,
+        last_error=None,
+        blocked_chunks=1,
+        failed_chunks=2,
+        coverage_ratio=0.4,
+        blocked_page_ranges=[[1, 2]],
+        failed_page_ranges=[[3, 4], [5, 6]],
+        manifest_path="manifests/case.json",
+        review_required=True,
+    )
+
+    assert status["failed_chunks"] == 2
+    assert status["failed_page_ranges"] == [[3, 4], [5, 6]]
+    assert status["blocked_chunks"] == 1
+    assert status["blocked_page_ranges"] == [[1, 2]]
+
+
+def test_pipeline_orchestrator_surfaces_failed_chunks():
+    import function_app
+
+    statuses = []
+    context = MagicMock()
+    context.get_input.return_value = "uploads/test_doc.pdf"
+    context.instance_id = "inst-1"
+    context.is_replaying = False
+    context.call_activity.side_effect = lambda name, *args: name
+    context.task_all.side_effect = lambda tasks: tasks
+    context.set_custom_status.side_effect = lambda payload: statuses.append(payload)
+
+    # Retrieve unwrapped generator function from durable functions wrapper
+    fn = function_app.pipeline_orchestrator._function._func
+    orchestrator_func = fn.__closure__[0].cell_contents
+
+    gen = orchestrator_func(context)
+
+    # 1. preflight
+    step = next(gen)
+    assert step == "activity_preflight_check"
+
+    # 2. chunking
+    step = gen.send(None)
+    assert step == "activity_chunking"
+
+    # 3. extraction batch
+    step = gen.send({"chunk_ids": ["c1", "c2"], "total_chunks": 2})
+
+    # 4. merge partials
+    extraction_results = [
+        {"outcome": "extraction_failed", "chunk_id": "c1"},
+        {"outcome": "success", "chunk_id": "c2"},
+    ]
+    step = gen.send(extraction_results)
+    assert step == "activity_merge_partials"
+
+    # 5. final indexing
+    merge_result = {
+        "status": "completed_partial",
+        "merged_graph_path": "graph.json",
+        "is_partial": True,
+        "failed_chunks": 1,
+        "failed_page_ranges": [[1, 2]],
+        "blocked_chunks": 0,
+        "blocked_page_ranges": [],
+        "manifest_path": "manifest.json",
+        "coverage_ratio": 0.5,
+        "review_required": True,
+    }
+    step = gen.send(merge_result)
+    assert step == "activity_final_indexing"
+
+    try:
+        gen.send("final_graph.json")
+    except StopIteration as stop:
+        result = stop.value
+
+    assert result["status"] == "completed_partial"
+    assert result["failed_count"] == 1
+    assert result["failed_page_ranges"] == [[1, 2]]
+    assert result["blocked_count"] == 0
+
+    final_status = statuses[-1]
+    assert final_status["failed_chunks"] == 1
+    assert final_status["failed_page_ranges"] == [[1, 2]]
+    assert final_status["blocked_chunks"] == 0
+
+
