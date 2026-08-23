@@ -12,6 +12,7 @@
     "package:ship": "gulp clean && gulp bundle --ship && gulp package-solution --ship",
     "package-solution": "gulp package-solution",
     "validate:auth-metadata": "node scripts/validate-auth-metadata.js",
+    "validate:serve-config": "node scripts/test-spfx-environment.js",
     "test:auth": "npm run validate:auth-metadata && tsc -p tsconfig.auth-tests.json && jest --runInBand --config test/jest.config.js",
     "serve": "gulp serve-deprecated",
     "trust-cert": "gulp trust-dev-cert"

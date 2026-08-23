@@ -59,3 +59,4 @@ docker/nginx/certs/*.crt
 docker/nginx/certs/*.key
 interview.md
 AUTHENTICATION_ARCHITECTURE_HE.md
+images

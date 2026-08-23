@@ -16,16 +16,24 @@ This SharePoint Framework (SPFx) web part provides the user interface for MAG Ag
 
 ```bash
 npm install
+cp ../app/.env.example ../app/.env.local
 npm run trust-cert
 npm run serve
 ```
 
 `serve` performs the debug build itself; do not run a separate `gulp bundle`
-before it. With current Chrome versions, grant the SharePoint origin the site
+before it. The one-time `trust-cert` command installs the local HTTPS development
+certificate; never run it automatically in CI. With current Chrome versions, grant the SharePoint origin the site
 permission named **Loopback network** or **Local network access** so the hosted
 workbench can load assets from `localhost`. If the permission is managed or hidden,
 use an unmanaged development profile or request the corresponding enterprise-policy
 allowlist from IT rather than disabling browser security.
+
+Set `SPFX_SERVE_TENANT_DOMAIN` in `frontend/app/.env.local` to a hostname such as
+`tikshuv.sharepoint.com` (without `https://`, a path, or a trailing slash). The
+serve task validates this value before SPFx starts and uses it to replace the
+`{tenantDomain}` token in `config/serve.json`; a missing or invalid value stops the
+task instead of opening a broken URL.
 
 The SPFx local dev server serves manifests from:
 
@@ -54,6 +62,7 @@ cp ../app/.env.example ../app/.env.local
 ```
 
 ```text
+SPFX_SERVE_TENANT_DOMAIN=tikshuv.sharepoint.com
 MAG_API_BASE_URL=https://<function-app>.azurewebsites.net
 MAG_ENTRA_TENANT_ID=78820852-55fa-450b-908d-45c0d911e76b
 MAG_ENTRA_CLIENT_ID=14b4e437-8b19-4950-9150-a46ab8d626b8
