@@ -21,8 +21,10 @@ export interface PipelineCustomStatus {
   current_batch?: number;
   last_error?: string | null;
   blocked_chunks?: number;
+  failed_chunks?: number;
   coverage_ratio?: number;
   blocked_page_ranges?: number[][];
+  failed_page_ranges?: number[][];
   manifest_path?: string | null;
   review_required?: boolean;
 }
@@ -54,7 +56,9 @@ export interface PipelineOutput {
   manifest_path?: string | null;
   coverage_ratio?: number;
   blocked_count?: number;
+  failed_count?: number;
   blocked_page_ranges?: number[][];
+  failed_page_ranges?: number[][];
   review_required?: boolean;
 }
 
@@ -157,7 +161,9 @@ export interface GraphQueryResult {
     review_required?: boolean;
     coverage_ratio?: number;
     blocked_chunks?: number;
+    failed_chunks?: number;
     blocked_page_ranges?: number[][];
+    failed_page_ranges?: number[][];
     trace_id?: string;
     manifest_path?: string;
   };
@@ -179,7 +185,9 @@ export interface CoverageMetadata {
   review_required?: boolean;
   coverage_ratio?: number;
   blocked_chunks?: number;
+  failed_chunks?: number;
   blocked_page_ranges?: number[][];
+  failed_page_ranges?: number[][];
   trace_id?: string;
   manifest_path?: string;
 }

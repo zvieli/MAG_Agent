@@ -54,31 +54,54 @@ export const PageShell: React.FC<PageShellProps> = ({ activePage, session, onNav
       })}
     </nav>
     <main className={styles.main}>
-      {(session.pipeline?.output?.review_required || session.pipeline?.customStatus?.review_required) && (
-        <div className={styles.partialCoverageWarning} role="status" aria-live="polite">
-          <strong>
-            {session.pipeline?.output?.status === 'content_blocked'
-              ? '⚠️ כל התוכן השמיש נחסם ולא נוצר גרף.'
-              : '⚠️ הגרף חלקי ונדרשת בדיקה.'}
-          </strong>{' '}
-          טווחי המקור שנחסמו הושמטו: {' '}
-          {JSON.stringify(
-            session.pipeline?.output?.blocked_page_ranges ||
-              session.pipeline?.customStatus?.blocked_page_ranges ||
-              []
-          )}. כיסוי משוקלל לפי טוקנים: {' '}
-          {Math.round(
-            100 *
-              (session.pipeline?.output?.coverage_ratio ??
-                session.pipeline?.customStatus?.coverage_ratio ??
-                0)
-          )}%.
-          אין לפרש ממצא חסר כהיעדר מהמסמך המלא. מזהה מעקב: {' '}
-          <span className={styles.ltrValue}>
-            {session.pipeline?.output?.trace_id || session.pipeline?.traceId || 'לא זמין'}
-          </span>
-        </div>
-      )}
+      {(session.pipeline?.output?.review_required || session.pipeline?.customStatus?.review_required) && (() => {
+        const blockedRanges =
+          session.pipeline?.output?.blocked_page_ranges ||
+          session.pipeline?.customStatus?.blocked_page_ranges ||
+          [];
+        const failedRanges =
+          session.pipeline?.output?.failed_page_ranges ||
+          session.pipeline?.customStatus?.failed_page_ranges ||
+          [];
+        const failedCount =
+          session.pipeline?.output?.failed_count ??
+          session.pipeline?.customStatus?.failed_chunks ??
+          0;
+        const coverageRatio =
+          session.pipeline?.output?.coverage_ratio ??
+          session.pipeline?.customStatus?.coverage_ratio ??
+          0;
+        const traceId =
+          session.pipeline?.output?.trace_id ||
+          session.pipeline?.traceId ||
+          'לא זמין';
+
+        return (
+          <div className={styles.partialCoverageWarning} role="status" aria-live="polite">
+            <strong>
+              {session.pipeline?.output?.status === 'content_blocked'
+                ? '⚠️ כל התוכן השמיש נחסם ולא נוצר גרף.'
+                : '⚠️ הגרף חלקי ונדרשת בדיקה.'}
+            </strong>{' '}
+            {blockedRanges.length > 0 && (
+              <>טווחי מקור שנחסמו ע"י מדיניות: {JSON.stringify(blockedRanges)}. </>
+            )}
+            {failedCount > 0 && (
+              <>
+                <strong>קטעים שנכשלו בחילוץ אוטומטי: {failedCount}</strong>
+                {failedRanges.length > 0 && <> (עמודים: {JSON.stringify(failedRanges)})</>}.{' '}
+                יש לבדוק חומר זה ידנית.{' '}
+              </>
+            )}
+            {blockedRanges.length === 0 && failedCount === 0 && (
+              <>הושמטו טווחי מקור.{' '}</>
+            )}
+            כיסוי משוקלל לפי טוקנים: {Math.round(100 * coverageRatio)}%.{' '}
+            אין לפרש ממצא חסר כהיעדר מהמסמך המלא. מזהה מעקב:{' '}
+            <span className={styles.ltrValue}>{traceId}</span>
+          </div>
+        );
+      })()}
       {children}
     </main>
   </section>
