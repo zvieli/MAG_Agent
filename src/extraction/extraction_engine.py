@@ -792,7 +792,7 @@ async def extract_from_chunk(
 
     strategies = [
         {"name": "STRICT", "temp": 0},
-        {"name": "STRICT_RETRY", "temp": 0},
+        {"name": "STRICT_RETRY", "temp": 0.2},
     ]
     last_validation_code = ExtractionOutcomeCode.OUTPUT_SCHEMA_INVALID
 
