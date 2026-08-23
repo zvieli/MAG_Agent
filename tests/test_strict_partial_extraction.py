@@ -281,6 +281,107 @@ async def test_partial_merge_is_token_weighted_and_persists_manifest():
 
 
 @pytest.mark.asyncio
+async def test_merge_partials_handles_both_failed_and_policy_blocked_chunks():
+    writes = {}
+    store = MagicMock()
+    store.write_bytes.side_effect = lambda path, data: writes.__setitem__(path, data)
+    store.read_bytes.return_value = json.dumps({"chunk_id": "00001", "text": "evidence text", "label": "Page 1"}).encode("utf-8")
+
+    results = [
+        {
+            "outcome": "success",
+            "doc_id": "case-3",
+            "chunk_id": "00001",
+            "page_range": [1],
+            "token_count": 50,
+            "source_label": "Page 1",
+            "extraction": {
+                "nodes": [{"id": "a", "label": "A", "type": "SUSPECT"}],
+                "edges": [],
+            },
+        },
+        {
+            "outcome": "content_blocked",
+            "doc_id": "case-3",
+            "chunk_id": "00002",
+            "page_range": [2, 3],
+            "token_count": 25,
+            "request_id": "req-2",
+            "provider_signal": "azure-content-policy-v1:$.error.code",
+            "reason": "Azure content policy blocked this chunk.",
+        },
+        {
+            "outcome": "extraction_failed",
+            "doc_id": "case-3",
+            "chunk_id": "00003",
+            "page_range": [4, 5],
+            "token_count": 25,
+            "request_id": "req-3",
+            "provider_signal": "schema_validation_error",
+            "reason": "Schema validation failed.",
+        },
+    ]
+    resolver = AsyncMock()
+    resolver.resolve.return_value = ([{"id": "a"}], [], {})
+    delete_mock = AsyncMock()
+
+    async def immediate(func, *args, **kwargs):
+        return func(*args, **kwargs)
+
+    with patch.object(activities, "_get_artifact_store", return_value=store), patch.object(
+        activities.asyncio, "to_thread", new=immediate
+    ), patch.object(activities, "DefaultEntityResolver", return_value=resolver), patch.object(
+        activities, "_index_chunks", new=AsyncMock()
+    ), patch.object(activities, "_delete_indexed_chunks", new=delete_mock):
+        result = await activities.activity_merge_partials(
+            {"results": results, "doc_id": "case-3", "trace_id": "trace-3"}
+        )
+
+    assert result["status"] == "completed_partial"
+    assert result["coverage_ratio"] == pytest.approx(0.5)
+    assert result["total_chunks"] == 3
+    assert result["successful_chunks"] == 1
+    assert result["blocked_chunks"] == 2
+    assert result["policy_blocked_chunks"] == 1
+    assert result["failed_chunks"] == 1
+    assert result["blocked_chunk_ids"] == ["00002"]
+    assert result["blocked_page_ranges"] == [[2, 3]]
+    assert result["blocked_ranges"] == [
+        {
+            "chunk_id": "00002",
+            "page_range": [2, 3],
+            "request_id": "req-2",
+            "provider_signal": "azure-content-policy-v1:$.error.code",
+            "reason": "Azure content policy blocked this chunk.",
+        }
+    ]
+    assert result["failed_chunk_ids"] == ["00003"]
+    assert result["failed_page_ranges"] == [[4, 5]]
+    assert result["failed_ranges"] == [
+        {
+            "chunk_id": "00003",
+            "page_range": [4, 5],
+            "request_id": "req-3",
+            "provider_signal": "schema_validation_error",
+            "reason": "Schema validation failed.",
+        }
+    ]
+    assert result["review_required"] is True
+
+    delete_mock.assert_awaited_once_with("case-3", ["00002", "00003"])
+
+    manifest = json.loads(writes[result["manifest_path"]].decode("utf-8"))
+    assert manifest["failed_chunks"] == 1
+    assert manifest["policy_blocked_chunks"] == 1
+    assert manifest["blocked_chunks"] == 2
+    assert manifest["failed_chunk_ids"] == ["00003"]
+    assert manifest["failed_page_ranges"] == [[4, 5]]
+    assert manifest["blocked_chunk_ids"] == ["00002"]
+    assert manifest["blocked_page_ranges"] == [[2, 3]]
+
+
+
+@pytest.mark.asyncio
 async def test_all_blocked_publishes_manifest_but_no_graph():
     writes = {}
     store = MagicMock()

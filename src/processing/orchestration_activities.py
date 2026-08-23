@@ -541,9 +541,9 @@ async def activity_merge_partials(
         for result_data in results:
             doc_id = result_data.get("doc_id", doc_id)
             outcome = result_data.get("outcome")
-            if outcome not in {None, "success", "content_blocked"}:
+            if outcome not in {None, "success", "content_blocked", "extraction_failed"}:
                 raise ValueError(f"Unsupported chunk extraction outcome: {outcome}")
-            if outcome == "content_blocked":
+            if outcome in {"content_blocked", "extraction_failed"}:
                 blocked.append(result_data)
                 continue
             successful.append(result_data)
@@ -564,6 +564,9 @@ async def activity_merge_partials(
                 d["source_location"] = source_label
                 all_edges.append(d)
 
+        failed = [item for item in blocked if item.get("outcome") == "extraction_failed"]
+        policy_blocked = [item for item in blocked if item.get("outcome") == "content_blocked"]
+
         total_tokens = sum(max(0, int(item.get("token_count") or 0)) for item in results)
         successful_tokens = sum(
             max(0, int(item.get("token_count") or 0)) for item in successful
@@ -581,12 +584,14 @@ async def activity_merge_partials(
             "total_chunks": len(results),
             "successful_chunks": len(successful),
             "blocked_chunks": len(blocked),
+            "failed_chunks": len(failed),
+            "policy_blocked_chunks": len(policy_blocked),
             "coverage_ratio": coverage_ratio,
             "coverage_method": "token_weighted",
             "total_source_tokens": total_tokens,
             "successful_source_tokens": successful_tokens,
-            "blocked_chunk_ids": [str(item.get("chunk_id")) for item in blocked],
-            "blocked_page_ranges": [list(item.get("page_range") or []) for item in blocked],
+            "blocked_chunk_ids": [str(item.get("chunk_id")) for item in policy_blocked],
+            "blocked_page_ranges": [list(item.get("page_range") or []) for item in policy_blocked],
             "blocked_ranges": [
                 {
                     "chunk_id": str(item.get("chunk_id")),
@@ -595,7 +600,19 @@ async def activity_merge_partials(
                     "provider_signal": item.get("provider_signal"),
                     "reason": item.get("reason"),
                 }
-                for item in blocked
+                for item in policy_blocked
+            ],
+            "failed_chunk_ids": [str(item.get("chunk_id")) for item in failed],
+            "failed_page_ranges": [list(item.get("page_range") or []) for item in failed],
+            "failed_ranges": [
+                {
+                    "chunk_id": str(item.get("chunk_id")),
+                    "page_range": list(item.get("page_range") or []),
+                    "request_id": item.get("request_id"),
+                    "provider_signal": item.get("provider_signal"),
+                    "reason": item.get("reason"),
+                }
+                for item in failed
             ],
             "model_deployment": settings.graphify_extraction_model,
             "ontology_version": _schema_version_for(SCHEMA_CONFIG),
