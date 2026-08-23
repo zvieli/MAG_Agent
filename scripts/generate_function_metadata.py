@@ -1,12 +1,16 @@
-import json
 import inspect
-import shutil
+import json
 from pathlib import Path
+import shutil
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 import function_app
 
 
-ROOT = Path(__file__).resolve().parents[1]
 WRAPPER_NAME = "generated_function_entrypoints.py"
 def _json_safe(value):
     if isinstance(value, dict):

@@ -1,6 +1,13 @@
 import asyncio
 import json
 import logging
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from src.storage.factory import get_artifact_store, get_search_manager
 from src.processing.vector_indexer import generate_embeddings
 from src.utils.config import settings

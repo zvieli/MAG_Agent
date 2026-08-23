@@ -1,5 +1,12 @@
 """Container build smoke test for the strict extraction runtime contract."""
 
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from importlib.metadata import version
 
 import pydantic

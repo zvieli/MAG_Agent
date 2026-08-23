@@ -2,7 +2,8 @@ FROM mcr.microsoft.com/azure-functions/python:4-python3.12
 
 ENV AzureWebJobsScriptRoot=/home/site/wwwroot/src/operations \
     AzureFunctionsJobHost__Logging__Console__IsEnabled=true \
-    TIKTOKEN_CACHE_DIR=/var/tmp/tiktoken_cache
+    TIKTOKEN_CACHE_DIR=/var/tmp/tiktoken_cache \
+    PYTHONPATH=/home/site/wwwroot
 
 WORKDIR /home/site/wwwroot
 
