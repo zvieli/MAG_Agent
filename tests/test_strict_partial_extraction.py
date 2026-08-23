@@ -153,6 +153,78 @@ async def test_content_blocked_activity_returns_sanitized_union_without_text():
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "outcome_code",
+    [
+        ExtractionOutcomeCode.OUTPUT_LOGIC_INVALID,
+        ExtractionOutcomeCode.OUTPUT_SCHEMA_INVALID,
+    ],
+)
+async def test_extraction_failed_activity_returns_graceful_payload(outcome_code):
+    chunk = {
+        "text": "bad extraction source text",
+        "doc_id": "case-1",
+        "chunk_index": 3,
+        "token_count": 42,
+        "page_range": [6, 7],
+    }
+    classification = ProviderClassification(
+        code=outcome_code,
+        request_id="req-err",
+        provider_signal="wire_validation_error",
+        sanitized_reason="Extraction validation failed.",
+    )
+    store = MagicMock()
+    with patch.object(activities, "_get_artifact_store", return_value=store), patch.object(
+        activities,
+        "extract_from_chunk",
+        new=AsyncMock(side_effect=ProviderOutcomeError(classification)),
+    ), patch.object(activities, "log_event") as mock_log_event, patch.object(
+        activities, "log_metric"
+    ) as mock_log_metric:
+        result = await activities.activity_extract_chunk(chunk)
+
+    assert result["outcome"] == "extraction_failed"
+    assert result["doc_id"] == "case-1"
+    assert result["chunk_id"] == "00003"
+    assert result["page_range"] == [6, 7]
+    assert result["token_count"] == 42
+    assert result["request_id"] == "req-err"
+    assert result["provider_signal"] == "wire_validation_error"
+    assert result["reason"] == "Extraction validation failed."
+    assert "text" not in result
+    assert "extraction" not in result
+    mock_log_event.assert_called_once()
+    assert mock_log_event.call_args[0][0] == "pipeline.extraction.chunk_failed"
+    mock_log_metric.assert_called_once_with(
+        "pipeline_failed_chunks_count", 1, doc_id="case-1"
+    )
+
+
+@pytest.mark.asyncio
+async def test_activity_extract_chunk_reraises_infrastructure_errors():
+    chunk = {
+        "text": "infra failure text",
+        "doc_id": "case-1",
+        "chunk_index": 1,
+    }
+    classification = ProviderClassification(
+        code=ExtractionOutcomeCode.PROVIDER_ERROR_UNCLASSIFIED,
+        request_id="req-auth",
+        provider_signal="invalid_api_key",
+        sanitized_reason="Authentication failed.",
+    )
+    store = MagicMock()
+    with patch.object(activities, "_get_artifact_store", return_value=store), patch.object(
+        activities,
+        "extract_from_chunk",
+        new=AsyncMock(side_effect=ProviderOutcomeError(classification)),
+    ):
+        with pytest.raises(RuntimeError, match="PROVIDER_ERROR_UNCLASSIFIED"):
+            await activities.activity_extract_chunk(chunk)
+
+
+@pytest.mark.asyncio
 async def test_partial_merge_is_token_weighted_and_persists_manifest():
     writes = {}
     store = MagicMock()

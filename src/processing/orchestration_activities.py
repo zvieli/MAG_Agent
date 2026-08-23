@@ -425,11 +425,23 @@ async def activity_extract_chunk(payload: Dict[str, Any]) -> Dict[str, Any]:
             )
         except ProviderOutcomeError as exc:
             classification = exc.classification
-            if classification.code is not ExtractionOutcomeCode.CONTENT_BLOCKED:
+            if classification.code == ExtractionOutcomeCode.CONTENT_BLOCKED:
+                outcome_key = "content_blocked"
+                event_name = "pipeline.extraction.chunk_blocked"
+                metric_name = "pipeline_filtered_chunks_count"
+            elif classification.code in {
+                ExtractionOutcomeCode.OUTPUT_LOGIC_INVALID,
+                ExtractionOutcomeCode.OUTPUT_SCHEMA_INVALID,
+            }:
+                outcome_key = "extraction_failed"
+                event_name = "pipeline.extraction.chunk_failed"
+                metric_name = "pipeline_failed_chunks_count"
+            else:
                 raise
+
             token_count = int(chunk_data.get("token_count") or _estimate_token_count(text))
             blocked_payload = {
-                "outcome": "content_blocked",
+                "outcome": outcome_key,
                 "doc_id": doc_id,
                 "chunk_id": chunk_id,
                 "page_range": list(chunk_data.get("page_range") or []),
@@ -439,7 +451,7 @@ async def activity_extract_chunk(payload: Dict[str, Any]) -> Dict[str, Any]:
                 "reason": classification.sanitized_reason,
             }
             log_event(
-                "pipeline.extraction.chunk_blocked",
+                event_name,
                 doc_id=doc_id,
                 chunk_id=chunk_id,
                 page_range=blocked_payload["page_range"],
@@ -449,7 +461,7 @@ async def activity_extract_chunk(payload: Dict[str, Any]) -> Dict[str, Any]:
                 discovered_codes=classification.discovered_codes,
                 body_key_shape=classification.body_key_shape,
             )
-            log_metric("pipeline_filtered_chunks_count", 1, doc_id=doc_id)
+            log_metric(metric_name, 1, doc_id=doc_id)
             return blocked_payload
 
         result_payload = {
